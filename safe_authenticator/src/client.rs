@@ -39,6 +39,36 @@ use tokio_core::reactor::Handle;
 use AuthFuture;
 use AuthMsgTx;
 
+macro_rules! wait_for_response {
+    ($rx:expr, $res:path, $msg_id:expr) => {
+        match $rx.recv_timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS)) {
+            Ok(Event::Response {
+                response:
+                    $res {
+                        res,
+                        msg_id: res_msg_id,
+                    },
+                ..
+            }) => {
+                if res_msg_id == $msg_id {
+                    res.map_err(CoreError::RoutingClientError)
+                } else {
+                    warn!("Received response with unexpected message id");
+                    Err(CoreError::OperationAborted)
+                }
+            }
+            Ok(x) => {
+                warn!("Received unexpected response: {:?}", x);
+                Err(CoreError::OperationAborted)
+            }
+            Err(err) => {
+                warn!("Failed to receive response: {:?}", err);
+                Err(CoreError::OperationAborted)
+            }
+        }
+    };
+}
+
 /// Client object used by safe_authenticator.
 pub struct AuthClient {
     inner: Rc<RefCell<ClientInner<AuthClient, ()>>>,
