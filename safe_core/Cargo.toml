@@ -19,7 +19,7 @@ futures = "~0.1.17"
 lazy_static = "~1.2.0"
 log = "~0.4.1"
 lru-cache = "~0.1.1"
-maidsafe_utilities = { git = "https://github.com/hunterlester/maidsafe_utilities" }
+maidsafe_utilities = { git = "https://github.com/hunterlester/maidsafe_utilities", branch = "0.17.0-upgrades" }
 rand = "~0.3.18"
 routing = { git = "https://github.com/hunterlester/routing" }
 rust_sodium = "~0.10.0"
