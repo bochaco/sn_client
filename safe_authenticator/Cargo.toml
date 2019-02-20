@@ -16,9 +16,9 @@ ffi_utils = "~0.11.0"
 futures = "~0.1.17"
 log = "~0.4.1"
 lru-cache = "~0.1.1"
-maidsafe_utilities = "~0.16.0"
+maidsafe_utilities = { git = "https://github.com/hunterlester/maidsafe_utilities" }
 rand = "~0.3.18"
-routing = "~0.37.0"
+routing = { git = "https://github.com/hunterlester/routing" }
 rust_sodium = "~0.10.0"
 safe_core = { path = "../safe_core", version = "~0.32.1" }
 serde = "~1.0.27"
@@ -36,9 +36,9 @@ features = ["testing"]
 [build-dependencies]
 ffi_utils = "~0.11.0"
 jni = "~0.10.1"
-routing = "~0.37.0"
+routing = { git = "https://github.com/hunterlester/routing" }
 rust_sodium = "~0.10.0"
-safe_bindgen = "~0.11.0"
+safe_bindgen = { git = "https://github.com/hunterlester/safe_bindgen" }
 unwrap = "~1.2.0"
 
 [features]
