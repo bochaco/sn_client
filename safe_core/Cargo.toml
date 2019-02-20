@@ -21,7 +21,7 @@ log = "~0.4.1"
 lru-cache = "~0.1.1"
 maidsafe_utilities = { git = "https://github.com/hunterlester/maidsafe_utilities", branch = "0.17.0-upgrades" }
 rand = "~0.3.18"
-routing = { git = "https://github.com/hunterlester/routing" }
+routing = { git = "https://github.com/hunterlester/routing", branch = "0.37.0-upgrades" }
 rust_sodium = "~0.10.0"
 self_encryption = { git = "https://github.com/hunterlester/self_encryption" }
 serde = "~1.0.27"
