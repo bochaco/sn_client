@@ -48,7 +48,7 @@ ffi_utils = "~0.11.0"
 jni = "~0.10.1"
 routing = { git = "https://github.com/hunterlester/routing", branch = "0.37.0-upgrades" }
 rust_sodium = "~0.10.0"
-safe_bindgen = { git = "https://github.com/hunterlester/safe_bindgen" }
+safe_bindgen = { git = "https://github.com/hunterlester/safe_bindgen", branch = "0.11.0-upgrades" }
 unwrap = "~1.2.0"
 
 [features]
