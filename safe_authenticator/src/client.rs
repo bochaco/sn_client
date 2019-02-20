@@ -23,12 +23,12 @@ use rust_sodium::crypto::sign::Seed;
 use rust_sodium::crypto::{box_, sign};
 use safe_core::client::account::Account;
 use safe_core::client::{
-    setup_routing, spawn_routing_thread, ClientInner, IMMUT_DATA_CACHE_SIZE, REQUEST_TIMEOUT_SECS,
+    setup_routing, spawn_routing_thread, ClientInner, IMMUT_DATA_CACHE_SIZE, REQUEST_TIMEOUT_SECS, wait_for_response,
 };
 use safe_core::crypto::{shared_box, shared_secretbox, shared_sign};
 #[cfg(any(test, feature = "testing"))]
 use safe_core::utils::seed::{divide_seed, SEED_SUBPARTS};
-use safe_core::{utils, Client, ClientKeys, CoreError, FutureExt, MDataInfo, NetworkTx};
+use safe_core::{utils, Client, ClientKeys, CoreError, FutureExt, MDataInfo, NetworkTx, wait_for_response,};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
