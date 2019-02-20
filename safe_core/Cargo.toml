@@ -23,7 +23,7 @@ maidsafe_utilities = { git = "https://github.com/hunterlester/maidsafe_utilities
 rand = "~0.3.18"
 routing = { git = "https://github.com/hunterlester/routing", branch = "0.37.0-upgrades" }
 rust_sodium = "~0.10.0"
-self_encryption = { git = "https://github.com/hunterlester/self_encryption" }
+self_encryption = { git = "https://github.com/hunterlester/self_encryption", branch = "0.13.0-upgrades" }
 serde = "~1.0.27"
 serde_derive = "~1.0.27"
 tiny-keccak = "~1.4.2"
