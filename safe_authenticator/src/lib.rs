@@ -108,8 +108,11 @@ pub use ffi::ipc::*;
 pub use ffi::logging::*;
 pub use ffi::*;
 
+/// Authenticator auth app
+pub mod app_auth;
+
 mod access_container;
-mod app_auth;
+// mod app_auth;
 mod app_container;
 mod client;
 mod config;
