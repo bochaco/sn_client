@@ -100,6 +100,9 @@ pub mod revocation;
 #[macro_use]
 pub mod test_utils;
 
+/// IPC calls
+pub mod ipc;
+
 pub use ffi::apps::*;
 pub use ffi::ipc::*;
 pub use ffi::logging::*;
