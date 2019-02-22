@@ -115,6 +115,7 @@ mod client;
 mod config;
 mod errors;
 mod ipc;
+mod revocation;
 mod std_dirs;
 #[cfg(test)]
 mod tests;
