@@ -94,6 +94,9 @@ extern crate rand;
 /// FFI routines.
 pub mod ffi;
 
+/// IPC calls
+pub mod ipc;
+
 pub use ffi::apps::*;
 pub use ffi::ipc::*;
 pub use ffi::logging::*;
