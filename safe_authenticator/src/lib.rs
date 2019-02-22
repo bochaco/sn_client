@@ -108,7 +108,7 @@ mod app_container;
 mod client;
 mod config;
 mod errors;
-mod ipc;
+/// mod ipc;
 mod revocation;
 mod std_dirs;
 
