@@ -33,7 +33,6 @@
     bad_style,
     deprecated,
     improper_ctypes,
-    missing_docs,
     non_shorthand_field_patterns,
     overflowing_literals,
     plugin_as_library,
@@ -134,7 +133,7 @@ pub mod nfs;
 /// Implements the Self Encryption storage trait.
 pub mod self_encryption_storage;
 
-mod errors;
+pub mod errors;
 mod event;
 
 pub use self::client::{mdata_info, recovery, Client, ClientKeys, MDataInfo};

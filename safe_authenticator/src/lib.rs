@@ -26,7 +26,6 @@
     bad_style,
     deprecated,
     improper_ctypes,
-    missing_docs,
     non_shorthand_field_patterns,
     overflowing_literals,
     plugin_as_library,
@@ -105,13 +104,16 @@ pub use ffi::*;
 /// Authenticator auth app
 pub mod app_auth;
 
+pub mod errors;
+pub mod config;
+
 mod access_container;
 // mod app_auth;
 mod app_container;
 mod client;
-mod config;
-mod errors;
-/// mod ipc;
+// mod config;
+// mod errors;
+// mod ipc;
 mod revocation;
 mod std_dirs;
 
