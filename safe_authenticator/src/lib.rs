@@ -114,7 +114,7 @@ mod client;
 // mod config;
 // mod errors;
 // mod ipc;
-mod revocation;
+pub mod revocation;
 mod std_dirs;
 
 /// Provides utilities to test the authenticator functionality.
