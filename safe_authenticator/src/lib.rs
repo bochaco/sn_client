@@ -107,7 +107,7 @@ pub mod app_auth;
 pub mod errors;
 pub mod config;
 
-mod access_container;
+pub mod access_container;
 // mod app_auth;
 mod app_container;
 mod client;
