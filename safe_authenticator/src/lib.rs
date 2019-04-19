@@ -26,7 +26,6 @@
     bad_style,
     deprecated,
     improper_ctypes,
-    missing_docs,
     non_shorthand_field_patterns,
     overflowing_literals,
     plugin_as_library,
@@ -94,14 +93,10 @@ extern crate rand;
 pub mod apps;
 /// FFI routines.
 pub mod ffi;
-pub mod revocation;
 /// Provides utilities to test the authenticator functionality.
 #[cfg(any(test, feature = "testing"))]
 #[macro_use]
 pub mod test_utils;
-
-/// IPC calls
-pub mod ipc;
 
 pub use ffi::apps::*;
 pub use ffi::ipc::*;
@@ -111,14 +106,14 @@ pub use ffi::*;
 /// Authenticator auth app
 pub mod app_auth;
 
-mod access_container;
+pub mod access_container;
 // mod app_auth;
 mod app_container;
 mod client;
-mod config;
-mod errors;
-mod ipc;
-mod revocation;
+pub mod config;
+pub mod errors;
+pub mod ipc;
+pub mod revocation;
 mod std_dirs;
 #[cfg(test)]
 mod tests;
