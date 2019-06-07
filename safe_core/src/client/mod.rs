@@ -46,15 +46,15 @@ use maidsafe_utilities::serialisation::{deserialise, serialise};
 use maidsafe_utilities::thread::{self, Joiner};
 use routing::{
     AccountInfo, Authority, EntryAction, Event, FullId, ImmutableData, InterfaceError, MessageId,
-    MutableData, PermissionSet, User, Value, XorName,
+    MutableData, PermissionSet, PublicId, User, Value, XorName,
 };
 use rust_sodium::crypto::{box_, sign};
 use safe_nd::mutable_data::{
     MutableData as NewMutableData, MutableDataRef, SeqMutableData, UnseqMutableData, Value as Val,
 };
 use safe_nd::request::{Request, Requester};
-use safe_nd::response::Response;
-use safe_nd::{MessageId as NewMessageId, XorName as NewXorName};
+use safe_nd::response::{Response, Transaction};
+use safe_nd::{AppPermissions, Coins, MessageId as NewMessageId, XorName as NewXorName};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io;
@@ -70,6 +70,9 @@ pub const REQUEST_TIMEOUT_SECS: u64 = 180;
 
 const CONNECTION_TIMEOUT_SECS: u64 = 40;
 const RETRY_DELAY_MS: u64 = 800;
+
+// TODO: Temp fix
+type ClientPublicId = PublicId;
 
 macro_rules! match_event {
     ($r:ident, $event:path) => {
@@ -252,6 +255,108 @@ pub trait Client: Clone + 'static {
             };
             routing.send(client, dst, &unwrap!(serialise(&request)))
         })
+    }
+
+    /// Transfer coin balance
+    fn transfer_coins(
+        &self,
+        destination: ClientPublicId,
+        amount: Coins,
+        transaction_id: Option<u64>,
+    ) -> Box<CoreFuture<()>> {
+        trace!("Transfer {} coins to {:?}", amount, destination);
+
+        let src = Authority::Client {
+            client_id: *some_or_err!(self.full_id()).public_id(),
+            proxy_node_name: rand::random(),
+        };
+
+        let transaction_id = transaction_id.unwrap_or_else(rand::random);
+
+        send_mutation(self, move |routing, dst, message_id| {
+            let request = Request::TransferCoins {
+                destination,
+                amount,
+                transaction_id,
+                message_id: message_id.to_new(),
+            };
+            routing.send(src, dst, &unwrap!(serialise(&request)))
+        })
+    }
+
+    /// Get the current coin balance.
+    fn get_balance(&self, destination: ClientPublicId) -> Box<CoreFuture<Coins>> {
+        trace!("Get balance for {:?}", destination);
+
+        let src = Authority::Client {
+            client_id: *some_or_err!(self.full_id()).public_id(),
+            proxy_node_name: rand::random(),
+        };
+
+        send(self, move |routing, message_id| {
+            let request = Request::GetBalance {
+                coins_balance_id: destination,
+                message_id: message_id.to_new(),
+            };
+            routing.send(
+                src,
+                Authority::ClientManager(*destination.name()),
+                &unwrap!(serialise(&request)),
+            )
+        })
+        .and_then(|event| {
+            let res = match event {
+                CoreEvent::RpcResponse(res) => res,
+                _ => Err(CoreError::ReceivedUnexpectedEvent),
+            };
+            let result_buffer = unwrap!(res);
+            let res: Response = unwrap!(deserialise(&result_buffer));
+            match res {
+                Response::GetBalance { res, .. } => res.map_err(CoreError::from),
+                _ => Err(CoreError::ReceivedUnexpectedEvent),
+            }
+        })
+        .into_box()
+    }
+
+    /// Get a transaction.
+    fn get_transaction(
+        &self,
+        destination: ClientPublicId,
+        transaction_id: u64,
+    ) -> Box<CoreFuture<Transaction>> {
+        trace!("Get transaction {} for {:?}", transaction_id, destination);
+
+        let src = Authority::Client {
+            client_id: *some_or_err!(self.full_id()).public_id(),
+            proxy_node_name: rand::random(),
+        };
+
+        send(self, move |routing, message_id| {
+            let request = Request::GetTransaction {
+                coins_balance_id: destination,
+                transaction_id,
+                message_id: message_id.to_new(),
+            };
+            routing.send(
+                src,
+                Authority::ClientManager(*destination.name()),
+                &unwrap!(serialise(&request)),
+            )
+        })
+        .and_then(|event| {
+            let res = match event {
+                CoreEvent::RpcResponse(res) => res,
+                _ => Err(CoreError::ReceivedUnexpectedEvent),
+            };
+            let result_buffer = unwrap!(res);
+            let res: Response = unwrap!(deserialise(&result_buffer));
+            match res {
+                Response::GetTransaction { res, .. } => res.map_err(CoreError::from),
+                _ => Err(CoreError::ReceivedUnexpectedEvent),
+            }
+        })
+        .into_box()
     }
 
     /// Put sequenced mutable data to the network
@@ -879,11 +984,16 @@ pub trait Client: Clone + 'static {
     }
 
     /// Adds a new authorised key to MaidManager.
-    fn ins_auth_key(&self, key: sign::PublicKey, version: u64) -> Box<CoreFuture<()>> {
+    fn ins_auth_key(
+        &self,
+        key: sign::PublicKey,
+        permissions: AppPermissions,
+        version: u64,
+    ) -> Box<CoreFuture<()>> {
         trace!("InsAuthKey ({:?})", key);
 
         send_mutation(self, move |routing, dst, msg_id| {
-            routing.ins_auth_key(dst, key, version, msg_id)
+            routing.ins_auth_key(dst, key, permissions.clone(), version, msg_id)
         })
     }
 
@@ -1065,7 +1175,8 @@ where
                 let response_buffer = unwrap!(res);
                 let response: Response = unwrap!(deserialise(&response_buffer));
                 match response {
-                    Response::PutUnseqMData { res, .. }
+                    Response::TransferCoins { res, .. }
+                    | Response::PutUnseqMData { res, .. }
                     | Response::PutSeqMData { res, .. }
                     | Response::DeleteMData { res, .. } => res.map_err(CoreError::from),
                     _ => Err(CoreError::ReceivedUnexpectedEvent),
@@ -1198,7 +1309,8 @@ impl MsgIdConverter for MessageId {
 mod tests {
     use super::*;
     use crate::utils::test_utils::random_client;
-    use safe_nd::XorName as SndXorName;
+    use safe_nd::{Coins, Error, XorName as SndXorName};
+    use std::str::FromStr;
 
     #[test]
     pub fn unseq_mdata_test() {
@@ -1386,6 +1498,73 @@ mod tests {
                     client3.get_unseq_mdata(XorName::from_new(*data.name()), data.tag())
                 })
                 .then(|res| res)
+        });
+    }
+
+    // 1. Create 2 accounts with 2 wallets (A and B).
+    // 2. Try to request balance of wallet A from account B. This request should fail.
+    // 3. Try to request transaction from wallet A using account B. This request should fail.
+    #[test]
+    fn coin_permissions() {
+        let wallet1 =
+            random_client(move |client| Ok::<_, Error>(*unwrap!(client.full_id()).public_id()));
+
+        random_client(move |client| {
+            let c2 = client.clone();
+
+            client
+                .get_balance(wallet1)
+                .then(move |res| {
+                    match res {
+                        Err(CoreError::NewRoutingClientError(Error::AccessDenied)) => (),
+                        res => panic!("Unexpected result: {:?}", res),
+                    }
+
+                    c2.get_transaction(wallet1, 1)
+                })
+                .then(move |res| {
+                    match res {
+                        Err(CoreError::NewRoutingClientError(Error::AccessDenied)) => (),
+                        res => panic!("Unexpected result: {:?}", res),
+                    }
+                    Ok::<_, Error>(())
+                })
+        });
+    }
+
+    // 1. Create 2 accounts with 2 wallets.
+    // 2. Transfer 5 coins from wallet A to wallet B.
+    // 3. Check that the balance of wallet A is credited for 5 coins and the balance of
+    //    wallet B is debited for 5 coins.
+    #[test]
+    fn coin_balance_transfer() {
+        let wallet1 =
+            random_client(move |client| Ok::<_, Error>(*unwrap!(client.full_id()).public_id()));
+
+        random_client(move |client| {
+            let wallet2 = *unwrap!(client.full_id()).public_id();
+
+            let c2 = client.clone();
+            let c3 = client.clone();
+
+            client
+                .get_balance(wallet2)
+                .and_then(move |orig_balance| {
+                    c2.transfer_coins(wallet1, unwrap!(Coins::from_str("5.0")), None)
+                        .map(move |_| orig_balance)
+                })
+                .and_then(move |orig_balance| {
+                    c3.get_balance(wallet2)
+                        .map(move |new_balance| (new_balance, orig_balance))
+                })
+                .and_then(move |(new_balance, orig_balance)| {
+                    assert_eq!(
+                        new_balance,
+                        unwrap!(orig_balance.checked_sub(unwrap!(Coins::from_str("5.0")))),
+                    );
+                    // TODO check the other wallet balance has been incremented
+                    Ok(())
+                })
         });
     }
 

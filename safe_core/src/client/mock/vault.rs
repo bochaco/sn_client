@@ -13,13 +13,16 @@ use crate::client::XorNameConverter;
 use crate::config_handler::{Config, DevConfig};
 use fs2::FileExt;
 use maidsafe_utilities::serialisation::{deserialise, serialise};
-use routing::{Authority, ClientError, ImmutableData, MutableData as OldMutableData, XorName};
+use routing::{
+    Authority, ClientError, ImmutableData, MutableData as OldMutableData, PublicId, XorName,
+};
 use rust_sodium::crypto::sign;
 use safe_nd::mutable_data::{
     Action, MutableData as NewMutableData, MutableDataRef, SeqMutableData, UnseqMutableData,
 };
 use safe_nd::request::{Request, Requester};
-use safe_nd::response::Response;
+use safe_nd::response::{Response, Transaction};
+use safe_nd::Coins;
 use safe_nd::Error;
 use std::collections::HashMap;
 use std::env;
@@ -31,6 +34,9 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 use std::time::SystemTime;
 use tiny_keccak::sha3_256;
+
+// TODO: temp fix
+type ClientPublicId = PublicId;
 
 const FILE_NAME: &str = "MockVault";
 
@@ -254,7 +260,7 @@ impl Vault {
 
         // Check if we are the owner or app.
         let owner_name = XorName(sha3_256(&sign_pk[..]));
-        if owner_name != dst_name && !account.auth_keys().contains(sign_pk) {
+        if owner_name != dst_name && !account.auth_keys().contains_key(sign_pk) {
             debug!("Mutation not authorised");
             return Err(ClientError::AccessDenied);
         }
@@ -322,14 +328,127 @@ impl Vault {
         let _ = self.cache.nae_manager.remove(&name);
     }
 
+    fn transfer_coins(
+        &mut self,
+        src: Authority<XorName>,
+        _dest: Authority<XorName>,
+        destination: ClientPublicId,
+        amount: Coins,
+        transaction_id: u64,
+    ) -> Result<(), Error> {
+        let client_id = if let Authority::Client { client_id, .. } = src {
+            client_id
+        } else {
+            return Err(Error::AccessDenied); // wrong authority
+        };
+
+        match self.get_account_mut(client_id.name()) {
+            Some(account) => account.credit_balance(amount, transaction_id)?,
+            None => return Err(Error::NoSuchAccount),
+        };
+        match self.get_account_mut(&destination.name()) {
+            Some(account) => account.debit_balance(amount)?,
+            None => return Err(Error::NoSuchAccount),
+        };
+        Ok(())
+    }
+
+    fn get_transaction(
+        &self,
+        src: Authority<XorName>,
+        coins_balance_id: ClientPublicId,
+        transaction_id: u64,
+    ) -> Result<Transaction, Error> {
+        let client_id = if let Authority::Client { client_id, .. } = src {
+            client_id
+        } else {
+            return Err(Error::AccessDenied); // wrong authority
+        };
+
+        // Check if we're the owner of the account
+        if coins_balance_id != client_id {
+            return Err(Error::AccessDenied);
+        }
+
+        let account = match self.get_account(&coins_balance_id.name()) {
+            Some(account) => account,
+            None => return Ok(Transaction::NoSuchCoinBalance),
+        };
+
+        match account.find_transaction(transaction_id) {
+            Some(amount) => Ok(Transaction::Success(amount)),
+            None => Ok(Transaction::NoSuchTransaction),
+        }
+    }
+
+    fn get_balance(
+        &self,
+        src: Authority<XorName>,
+        coins_balance_id: ClientPublicId,
+    ) -> Result<Coins, Error> {
+        let client_id = if let Authority::Client { client_id, .. } = src {
+            client_id
+        } else {
+            return Err(Error::AccessDenied); // wrong authority
+        };
+
+        // Check if we're the owner of the account
+        if coins_balance_id != client_id {
+            return Err(Error::AccessDenied);
+        }
+
+        let account = match self.get_account(coins_balance_id.name()) {
+            Some(account) => account,
+            None => return Err(Error::NoSuchAccount),
+        };
+
+        Ok(account.balance())
+    }
+
     pub fn process_request(
         &mut self,
-        _src: Authority<XorName>,
+        src: Authority<XorName>,
         dest: Authority<XorName>,
         payload: Vec<u8>,
     ) -> Result<(Authority<XorName>, Vec<u8>), Error> {
         let request: Request = unwrap!(deserialise(&payload));
         match request {
+            Request::TransferCoins {
+                destination,
+                amount,
+                transaction_id,
+                message_id,
+            } => {
+                let res = self.transfer_coins(src, dest, destination, amount, transaction_id);
+                let payload = unwrap!(serialise(&Response::TransferCoins {
+                    res,
+                    msg_id: message_id
+                }));
+                Ok((dest, payload))
+            }
+            Request::GetBalance {
+                coins_balance_id,
+                message_id,
+            } => {
+                let res = self.get_balance(src, coins_balance_id);
+                let payload = unwrap!(serialise(&Response::GetBalance {
+                    res,
+                    msg_id: message_id
+                }));
+                Ok((dest, payload))
+            }
+            Request::GetTransaction {
+                coins_balance_id,
+                transaction_id,
+                message_id,
+            } => {
+                let transaction = self.get_transaction(src, coins_balance_id, transaction_id);
+                let payload = unwrap!(serialise(&Response::GetTransaction {
+                    res: transaction,
+                    msg_id: message_id,
+                }));
+                Ok((dest, payload))
+            }
             Request::PutUnseqMData {
                 data,
                 requester,

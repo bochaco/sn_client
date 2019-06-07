@@ -588,7 +588,13 @@ fn mutable_data_permissions() {
     let (_, version) = expect_success!(routing_rx, msg_id, Response::ListAuthKeysAndVersion);
 
     let msg_id = MessageId::new();
-    unwrap!(routing.ins_auth_key(client_mgr, app_sign_key, version + 1, msg_id));
+    unwrap!(routing.ins_auth_key(
+        client_mgr,
+        app_sign_key,
+        Default::default(),
+        version + 1,
+        msg_id
+    ));
     expect_success!(routing_rx, msg_id, Response::InsAuthKey);
 
     // App can't mutate any entry, by default.
@@ -830,7 +836,13 @@ fn mutable_data_permissions() {
     let (_, version) = expect_success!(routing_rx, msg_id, Response::ListAuthKeysAndVersion);
 
     let msg_id = MessageId::new();
-    unwrap!(routing.ins_auth_key(client_mgr, app2_sign_key, version + 1, msg_id));
+    unwrap!(routing.ins_auth_key(
+        client_mgr,
+        app2_sign_key,
+        Default::default(),
+        version + 1,
+        msg_id
+    ));
     expect_success!(routing_rx, msg_id, Response::InsAuthKey);
 
     // The new app can't mutate entries
@@ -933,7 +945,7 @@ fn mutable_data_ownership() {
     let app_sign_key = *app_full_id.public_id().signing_public_key();
 
     let msg_id = MessageId::new();
-    unwrap!(owner_routing.ins_auth_key(client_mgr, app_sign_key, 1, msg_id));
+    unwrap!(owner_routing.ins_auth_key(client_mgr, app_sign_key, Default::default(), 1, msg_id));
     expect_success!(owner_routing_rx, msg_id, Response::InsAuthKey);
 
     // Attempt to put MutableData using the app sign key as owner key should fail.
@@ -1093,7 +1105,7 @@ fn auth_keys() {
 
     // Attempt to insert an auth key without proper version bump fails.
     let msg_id = MessageId::new();
-    unwrap!(routing.ins_auth_key(client_mgr, auth_key1, 0, msg_id));
+    unwrap!(routing.ins_auth_key(client_mgr, auth_key1, Default::default(), 0, msg_id));
     expect_failure!(
         routing_rx,
         msg_id,
@@ -1103,7 +1115,7 @@ fn auth_keys() {
 
     // Insert an auth key with proper version bump succeeds.
     let msg_id = MessageId::new();
-    unwrap!(routing.ins_auth_key(client_mgr, auth_key1, 1, msg_id));
+    unwrap!(routing.ins_auth_key(client_mgr, auth_key1, Default::default(), 1, msg_id));
     expect_success!(routing_rx, msg_id, Response::InsAuthKey);
 
     // Retrieve the list of auth keys and version
