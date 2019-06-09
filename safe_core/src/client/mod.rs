@@ -54,7 +54,7 @@ use safe_nd::mutable_data::{
 };
 use safe_nd::request::{Request, Requester};
 use safe_nd::response::Response;
-use safe_nd::{MessageId as NewMessageId, XorName as NewXorName};
+use safe_nd::{MessageId as NewMessageId, PublicKey, XorName as NewXorName};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io;
@@ -247,7 +247,7 @@ pub trait Client: Clone + 'static {
         send_mutation(self, move |routing, dst, message_id| {
             let request = Request::PutUnseqMData {
                 data: data.clone(),
-                requester: Requester::Key(requester),
+                requester: Requester::Key(PublicKey::Bls(requester)),
                 message_id: message_id.to_new(),
             };
             routing.send(client, dst, &unwrap!(serialise(&request)))
@@ -266,7 +266,7 @@ pub trait Client: Clone + 'static {
         send_mutation(self, move |routing, dst, message_id| {
             let request = Request::PutSeqMData {
                 data: data.clone(),
-                requester: Requester::Key(requester),
+                requester: Requester::Key(PublicKey::Bls(requester)),
                 message_id: message_id.to_new(),
             };
             routing.send(client, dst, &unwrap!(serialise(&request)))
@@ -285,7 +285,7 @@ pub trait Client: Clone + 'static {
         send(self, move |routing, msg_id| {
             let request = Request::GetUnseqMData {
                 address: MutableDataRef::new(name.to_new(), tag),
-                requester: Requester::Key(requester),
+                requester: Requester::Key(PublicKey::Bls(requester)),
                 message_id: msg_id.to_new(),
             };
             routing.send(
@@ -319,9 +319,10 @@ pub trait Client: Clone + 'static {
             proxy_node_name: rand::random(),
         };
         send(self, move |routing, msg_id| {
+            // let requester = construct_requester(bls_sk, as_owner, msg_id);
             let request = Request::GetSeqMData {
                 address: MutableDataRef::new(name.to_new(), tag),
-                requester: Requester::Key(requester),
+                requester: Requester::Key(PublicKey::Bls(requester)),
                 message_id: msg_id.to_new(),
             };
             routing.send(
@@ -414,7 +415,7 @@ pub trait Client: Clone + 'static {
         send(self, move |routing, msg_id| {
             let request = Request::GetSeqMDataShell {
                 address: MutableDataRef::new(name.to_new(), tag),
-                requester: Requester::Key(requester),
+                requester: Requester::Key(PublicKey::Bls(requester)),
                 message_id: msg_id.to_new(),
             };
 
@@ -451,7 +452,7 @@ pub trait Client: Clone + 'static {
         send(self, move |routing, msg_id| {
             let request = Request::GetUnseqMDataShell {
                 address: MutableDataRef::new(name.to_new(), tag),
-                requester: Requester::Key(requester),
+                requester: Requester::Key(PublicKey::Bls(requester)),
                 message_id: msg_id.to_new(),
             };
 
@@ -488,7 +489,7 @@ pub trait Client: Clone + 'static {
         send(self, move |routing, msg_id| {
             let request = Request::GetMDataVersion {
                 address: MutableDataRef::new(name.to_new(), tag),
-                requester: Requester::Key(requester),
+                requester: Requester::Key(PublicKey::Bls(requester)),
                 message_id: msg_id.to_new(),
             };
 
@@ -555,7 +556,7 @@ pub trait Client: Clone + 'static {
         send(self, move |routing, msg_id| {
             let request = Request::ListUnseqMDataEntries {
                 address: MutableDataRef::new(name.to_new(), tag),
-                requester: Requester::Key(requester),
+                requester: Requester::Key(PublicKey::Bls(requester)),
                 message_id: msg_id.to_new(),
             };
 
@@ -596,7 +597,7 @@ pub trait Client: Clone + 'static {
         send(self, move |routing, msg_id| {
             let request = Request::ListSeqMDataEntries {
                 address: MutableDataRef::new(name.to_new(), tag),
-                requester: Requester::Key(requester),
+                requester: Requester::Key(PublicKey::Bls(requester)),
                 message_id: msg_id.to_new(),
             };
 
@@ -644,7 +645,7 @@ pub trait Client: Clone + 'static {
         send(self, move |routing, msg_id| {
             let request = Request::ListMDataKeys {
                 address: MutableDataRef::new(name.to_new(), tag),
-                requester: Requester::Key(requester),
+                requester: Requester::Key(PublicKey::Bls(requester)),
                 message_id: msg_id.to_new(),
             };
 
@@ -681,7 +682,7 @@ pub trait Client: Clone + 'static {
         send(self, move |routing, msg_id| {
             let request = Request::ListSeqMDataValues {
                 address: MutableDataRef::new(name.to_new(), tag),
-                requester: Requester::Key(requester),
+                requester: Requester::Key(PublicKey::Bls(requester)),
                 message_id: msg_id.to_new(),
             };
 
@@ -718,7 +719,7 @@ pub trait Client: Clone + 'static {
         send(self, move |routing, msg_id| {
             let request = Request::ListUnseqMDataValues {
                 address: MutableDataRef::new(name.to_new(), tag),
-                requester: Requester::Key(requester),
+                requester: Requester::Key(PublicKey::Bls(requester)),
                 message_id: msg_id.to_new(),
             };
 
@@ -1199,6 +1200,7 @@ mod tests {
     use super::*;
     use crate::utils::test_utils::random_client;
     use safe_nd::XorName as SndXorName;
+    use safe_nd::mutable_data::{Action, PermissionSet as NewPermissionSet};
 
     #[test]
     pub fn unseq_mdata_test() {
@@ -1212,6 +1214,12 @@ mod tests {
             let name = XorName(rand::random());
             let tag = 15001;
             let mut entries: BTreeMap<Vec<u8>, Vec<u8>> = Default::default();
+            let mut permissions: BTreeMap<_, _> = Default::default();
+            let permission_set = NewPermissionSet::new().allow(Action::Read);
+            let _ = permissions.insert(
+                PublicKey::Bls(unwrap!(client.public_bls_key())),
+                permission_set.clone(),
+            );
             let _ = entries.insert(b"key".to_vec(), b"value".to_vec());
             let entries_keys = entries.keys().cloned().collect();
             let entries_values: Vec<Vec<u8>> = entries.values().cloned().collect();
@@ -1220,7 +1228,7 @@ mod tests {
                 name.to_new(),
                 tag,
                 entries.clone(),
-                Default::default(),
+                permissions,
                 unwrap!(client.public_bls_key()),
             );
             client
@@ -1277,12 +1285,17 @@ mod tests {
             let _ = entries.insert(b"key".to_vec(), Val::new(b"value".to_vec(), 0));
             let entries_keys = entries.keys().cloned().collect();
             let entries_values: Vec<Val> = entries.values().cloned().collect();
-
+            let mut permissions: BTreeMap<_, _> = Default::default();
+            let permission_set = NewPermissionSet::new().allow(Action::Read);
+            let _ = permissions.insert(
+                PublicKey::Bls(unwrap!(client.public_bls_key())),
+                permission_set.clone(),
+            );
             let data = SeqMutableData::new_with_data(
                 name.to_new(),
                 tag,
                 entries.clone(),
-                Default::default(),
+                permissions,
                 unwrap!(client.public_bls_key()),
             );
             client
