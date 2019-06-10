@@ -50,7 +50,8 @@ use routing::{
 };
 use rust_sodium::crypto::{box_, sign};
 use safe_nd::mutable_data::{
-    MutableData as NewMutableData, MutableDataRef, SeqMutableData, UnseqMutableData, Value as Val,
+    MutableData as NewMutableData, MutableDataRef, PermissionSet as NewPermissionSet,
+    SeqEntryAction, SeqMutableData, UnseqEntryAction, UnseqMutableData, Value as Val,
 };
 use safe_nd::request::{Request, Requester};
 use safe_nd::response::Response;
@@ -381,6 +382,56 @@ pub trait Client: Clone + 'static {
         })
     }
 
+    /// Mutates sequenced `MutableData` entries in bulk
+    fn mutate_seq_mdata_entries(
+        &self,
+        name: XorName,
+        tag: u64,
+        actions: BTreeMap<Vec<u8>, SeqEntryAction>,
+    ) -> Box<CoreFuture<()>> {
+        trace!("Mutate MData for {:?}", name);
+
+        let requester = some_or_err!(self.public_bls_key());
+        let client = Authority::Client {
+            client_id: *some_or_err!(self.full_id()).public_id(),
+            proxy_node_name: rand::random(),
+        };
+        send_mutation(self, move |routing, dst, message_id| {
+            let request = Request::MutateSeqMDataEntries {
+                address: MutableDataRef::new(name.to_new(), tag),
+                actions: actions.clone(),
+                requester: Requester::Key(PublicKey::Bls(requester)),
+                message_id: message_id.to_new(),
+            };
+            routing.send(client, dst, &unwrap!(serialise(&request)))
+        })
+    }
+
+    /// Mutates unsequenced `MutableData` entries in bulk
+    fn mutate_unseq_mdata_entries(
+        &self,
+        name: XorName,
+        tag: u64,
+        actions: BTreeMap<Vec<u8>, UnseqEntryAction>,
+    ) -> Box<CoreFuture<()>> {
+        trace!("Mutate MData for {:?}", name);
+
+        let requester = some_or_err!(self.public_bls_key());
+        let client = Authority::Client {
+            client_id: *some_or_err!(self.full_id()).public_id(),
+            proxy_node_name: rand::random(),
+        };
+        send_mutation(self, move |routing, dst, message_id| {
+            let request = Request::MutateUnseqMDataEntries {
+                address: MutableDataRef::new(name.to_new(), tag),
+                actions: actions.clone(),
+                requester: Requester::Key(PublicKey::Bls(requester)),
+                message_id: message_id.to_new(),
+            };
+            routing.send(client, dst, &unwrap!(serialise(&request)))
+        })
+    }
+
     /// Get entire `MutableData` from the network.
     fn get_mdata(&self, name: XorName, tag: u64) -> Box<CoreFuture<MutableData>> {
         trace!("GetMData for {:?}", name);
@@ -707,6 +758,49 @@ pub trait Client: Clone + 'static {
         .into_box()
     }
 
+    /// Return the permissions set for a particular user
+    fn list_mdata_user_permissions_new(
+        &self,
+        name: XorName,
+        tag: u64,
+        user: PublicKey,
+    ) -> Box<CoreFuture<NewPermissionSet>> {
+        trace!("GetMDataUserPermissions for {:?}", name);
+
+        let requester = some_or_err!(self.public_bls_key());
+        let client = Authority::Client {
+            client_id: *some_or_err!(self.full_id()).public_id(),
+            proxy_node_name: rand::random(),
+        };
+        send(self, move |routing, msg_id| {
+            let request = Request::ListMDataUserPermissions {
+                address: MutableDataRef::new(name.to_new(), tag),
+                user: user.clone(),
+                requester: Requester::Key(PublicKey::Bls(requester)),
+                message_id: msg_id.to_new(),
+            };
+
+            routing.send(
+                client,
+                Authority::NaeManager(name),
+                &unwrap!(serialise(&request)),
+            )
+        })
+        .and_then(|event| {
+            let res = match event {
+                CoreEvent::RpcResponse(res) => res,
+                _ => Err(CoreError::ReceivedUnexpectedEvent),
+            };
+            let result_buffer = unwrap!(res);
+            let res: Response<ClientError> = unwrap!(deserialise(&result_buffer));
+            match res {
+                Response::ListMDataUserPermissions { res, .. } => res.map_err(CoreError::from),
+                _ => Err(CoreError::ReceivedUnexpectedEvent),
+            }
+        })
+        .into_box()
+    }
+
     /// Returns a list of values in an Unsequenced Mutable Data
     fn list_unseq_mdata_values(&self, name: XorName, tag: u64) -> Box<CoreFuture<Vec<Vec<u8>>>> {
         trace!("List MDataValues for {:?}", name);
@@ -793,6 +887,47 @@ pub trait Client: Clone + 'static {
         .into_box()
     }
 
+    /// Return a list of permissions in `MutableData` stored on the network.
+    fn list_mdata_permissions_new(
+        &self,
+        name: XorName,
+        tag: u64,
+    ) -> Box<CoreFuture<BTreeMap<PublicKey, NewPermissionSet>>> {
+        trace!("List MDataPermissions for {:?}", name);
+
+        let requester = some_or_err!(self.public_bls_key());
+        let client = Authority::Client {
+            client_id: *some_or_err!(self.full_id()).public_id(),
+            proxy_node_name: rand::random(),
+        };
+        send(self, move |routing, msg_id| {
+            let request = Request::ListMDataPermissions {
+                address: MutableDataRef::new(name.to_new(), tag),
+                requester: Requester::Key(PublicKey::Bls(requester)),
+                message_id: msg_id.to_new(),
+            };
+
+            routing.send(
+                client,
+                Authority::NaeManager(name),
+                &unwrap!(serialise(&request)),
+            )
+        })
+        .and_then(|event| {
+            let res = match event {
+                CoreEvent::RpcResponse(res) => res,
+                _ => Err(CoreError::ReceivedUnexpectedEvent),
+            };
+            let result_buffer = unwrap!(res);
+            let res: Response<ClientError> = unwrap!(deserialise(&result_buffer));
+            match res {
+                Response::ListMDataPermissions { res, .. } => res.map_err(CoreError::from),
+                _ => Err(CoreError::ReceivedUnexpectedEvent),
+            }
+        })
+        .into_box()
+    }
+
     /// Return a list of permissions for a particular User in MutableData.
     fn list_mdata_user_permissions(
         &self,
@@ -833,6 +968,62 @@ pub trait Client: Clone + 'static {
                 msg_id,
                 requester,
             )
+        })
+    }
+
+    /// Updates or inserts a permissions set for a user
+    fn set_mdata_user_permissions_new(
+        &self,
+        name: XorName,
+        tag: u64,
+        user: PublicKey,
+        permissions: NewPermissionSet,
+        version: u64,
+    ) -> Box<CoreFuture<()>> {
+        trace!("SetMDataUserPermissions for {:?}", name);
+
+        let requester = some_or_err!(self.public_bls_key());
+        let client = Authority::Client {
+            client_id: *some_or_err!(self.full_id()).public_id(),
+            proxy_node_name: rand::random(),
+        };
+        send_mutation(self, move |routing, dst, message_id| {
+            let request = Request::SetMDataUserPermissions {
+                address: MutableDataRef::new(name.to_new(), tag),
+                user: user.clone(),
+                permissions: permissions.clone(),
+                version,
+                requester: Requester::Key(PublicKey::Bls(requester)),
+                message_id: message_id.to_new(),
+            };
+            routing.send(client, dst, &unwrap!(serialise(&request)))
+        })
+    }
+
+    /// Updates or inserts a permissions set for a user
+    fn del_mdata_user_permissions_new(
+        &self,
+        name: XorName,
+        tag: u64,
+        user: PublicKey,
+        version: u64,
+    ) -> Box<CoreFuture<()>> {
+        trace!("DelMDataUserPermissions for {:?}", name);
+
+        let requester = some_or_err!(self.public_bls_key());
+        let client = Authority::Client {
+            client_id: *some_or_err!(self.full_id()).public_id(),
+            proxy_node_name: rand::random(),
+        };
+        send_mutation(self, move |routing, dst, message_id| {
+            let request = Request::DelMDataUserPermissions {
+                address: MutableDataRef::new(name.to_new(), tag),
+                user: user.clone(),
+                version,
+                requester: Requester::Key(PublicKey::Bls(requester)),
+                message_id: message_id.to_new(),
+            };
+            routing.send(client, dst, &unwrap!(serialise(&request)))
         })
     }
 
@@ -1067,8 +1258,12 @@ where
                 let response: Response = unwrap!(deserialise(&response_buffer));
                 match response {
                     Response::PutUnseqMData { res, .. }
-                    | Response::PutSeqMData { res, .. }
-                    | Response::DeleteMData { res, .. } => res.map_err(CoreError::from),
+                    | Response::DeleteMData { res, .. }
+                    | Response::SetMDataUserPermissions { res, .. }
+                    | Response::DelMDataUserPermissions { res, .. }
+                    | Response::MutateSeqMDataEntries { res, .. }
+                    | Response::MutateUnseqMDataEntries { res, .. }
+                    | Response::PutSeqMData { res, .. } => res.map_err(CoreError::from),
                     _ => Err(CoreError::ReceivedUnexpectedEvent),
                 }
             }
@@ -1422,5 +1617,207 @@ mod tests {
         });
 
         random_client(move |client1| client1.delete_mdata(mdataref).map_err(CoreError::from));
+    }
+
+    #[test]
+    pub fn mdata_permissions_test() {
+        random_client(|client| {
+            let client2 = client.clone();
+            let client3 = client.clone();
+            let client4 = client.clone();
+            let client5 = client.clone();
+            let name = XorName(rand::random());
+            let tag = 15001;
+            let mut permissions: BTreeMap<_, _> = Default::default();
+            let permission_set = NewPermissionSet::new()
+                .allow(Action::Read)
+                .allow(Action::Insert)
+                .allow(Action::ManagePermissions);
+            let user = PublicKey::Bls(unwrap!(client.public_bls_key()));
+            let user2 = user.clone();
+            let random_user = PublicKey::Bls(threshold_crypto::SecretKey::random().public_key());
+            let _ = permissions.insert(user.clone(), permission_set.clone());
+            let _ = permissions.insert(random_user.clone(), permission_set.clone());
+            let data = SeqMutableData::new_with_data(
+                name.to_new(),
+                tag,
+                Default::default(),
+                permissions,
+                unwrap!(client.public_bls_key()),
+            );
+            client
+                .put_seq_mutable_data(data.clone())
+                .and_then(move |_| {
+                    println!("Put seq. MData successfully");
+
+                    Ok(())
+                })
+                .and_then(move |_| {
+                    let new_perm_set = NewPermissionSet::new()
+                        .allow(Action::ManagePermissions)
+                        .allow(Action::Read);
+                    client2
+                        .set_mdata_user_permissions_new(name, tag, user, new_perm_set, 1)
+                        .and_then(|_| Ok(()))
+                })
+                .and_then(move |_| {
+                    println!("Modified user permissions");
+
+                    client3
+                        .list_mdata_user_permissions_new(name, tag, user2)
+                        .and_then(|permissions| {
+                            assert!(!permissions.is_allowed(Action::Insert));
+                            assert!(permissions.is_allowed(Action::Read));
+                            assert!(permissions.is_allowed(Action::ManagePermissions));
+                            println!("Verified new permissions");
+
+                            Ok(())
+                        })
+                })
+                .and_then(move |_| {
+                    client4
+                        .del_mdata_user_permissions_new(name, tag, random_user, 2)
+                        .and_then(|_| Ok(()))
+                })
+                .and_then(move |_| {
+                    println!("Deleted permissions");
+                    client5
+                        .list_mdata_permissions_new(name, tag)
+                        .and_then(|permissions| {
+                            assert_eq!(permissions.len(), 1);
+                            println!("Permission set verified");
+                            Ok(())
+                        })
+                })
+        })
+    }
+
+    #[test]
+    pub fn mdata_mutations_test() {
+        random_client(|client| {
+            let client2 = client.clone();
+            let client3 = client.clone();
+            let client4 = client.clone();
+            let name = XorName(rand::random());
+            let tag = 15001;
+            let mut permissions: BTreeMap<_, _> = Default::default();
+            let permission_set = NewPermissionSet::new()
+                .allow(Action::Read)
+                .allow(Action::Insert)
+                .allow(Action::Update)
+                .allow(Action::Delete);
+            let user = PublicKey::Bls(unwrap!(client.public_bls_key()));
+            let _ = permissions.insert(user.clone(), permission_set.clone());
+            let mut entries: BTreeMap<Vec<u8>, Val> = Default::default();
+            let _ = entries.insert(b"key1".to_vec(), Val::new(b"value".to_vec(), 0));
+            let _ = entries.insert(b"key2".to_vec(), Val::new(b"value".to_vec(), 0));
+            let data = SeqMutableData::new_with_data(
+                name.to_new(),
+                tag,
+                entries.clone(),
+                permissions,
+                unwrap!(client.public_bls_key()),
+            );
+            client
+                .put_seq_mutable_data(data.clone())
+                .and_then(move |_| {
+                    println!("Put seq. MData successfully");
+
+                    client2
+                        .list_seq_mdata_entries(name, tag)
+                        .map(move |fetched_entries| {
+                            assert_eq!(fetched_entries, entries);
+                        })
+                })
+                .and_then(move |_| {
+                    let mut entry_actions: BTreeMap<Vec<u8>, SeqEntryAction> = Default::default();
+                    let _ = entry_actions.insert(
+                        b"key1".to_vec(),
+                        SeqEntryAction::Update(Val::new(b"newValue".to_vec(), 1)),
+                    );
+                    let _ = entry_actions.insert(b"key2".to_vec(), SeqEntryAction::Del(1));
+                    let _ = entry_actions.insert(
+                        b"key3".to_vec(),
+                        SeqEntryAction::Ins(Val::new(b"value".to_vec(), 0)),
+                    );
+
+                    client3
+                        .mutate_seq_mdata_entries(name, tag, entry_actions.clone())
+                        .and_then(|_| Ok(()))
+                })
+                .and_then(move |_| {
+                    client4
+                        .list_seq_mdata_entries(name, tag)
+                        .map(move |fetched_entries| {
+                            let mut expected_entries: BTreeMap<_, _> = Default::default();
+                            let _ = expected_entries
+                                .insert(b"key1".to_vec(), Val::new(b"newValue".to_vec(), 1));
+                            let _ = expected_entries
+                                .insert(b"key3".to_vec(), Val::new(b"value".to_vec(), 0));
+                            assert_eq!(fetched_entries, expected_entries);
+                        })
+                })
+        });
+
+        random_client(|client| {
+            let client2 = client.clone();
+            let client3 = client.clone();
+            let client4 = client.clone();
+            let name = XorName(rand::random());
+            let tag = 15001;
+            let mut permissions: BTreeMap<_, _> = Default::default();
+            let permission_set = NewPermissionSet::new()
+                .allow(Action::Read)
+                .allow(Action::Insert)
+                .allow(Action::Update)
+                .allow(Action::Delete);
+            let user = PublicKey::Bls(unwrap!(client.public_bls_key()));
+            let _ = permissions.insert(user.clone(), permission_set.clone());
+            let mut entries: BTreeMap<Vec<u8>, Vec<u8>> = Default::default();
+            let _ = entries.insert(b"key1".to_vec(), b"value".to_vec());
+            let _ = entries.insert(b"key2".to_vec(), b"value".to_vec());
+            let data = UnseqMutableData::new_with_data(
+                name.to_new(),
+                tag,
+                entries.clone(),
+                permissions,
+                unwrap!(client.public_bls_key()),
+            );
+            client
+                .put_unseq_mutable_data(data.clone())
+                .and_then(move |_| {
+                    println!("Put unseq. MData successfully");
+
+                    client2
+                        .list_unseq_mdata_entries(name, tag)
+                        .map(move |fetched_entries| {
+                            assert_eq!(fetched_entries, entries);
+                        })
+                })
+                .and_then(move |_| {
+                    let mut entry_actions: BTreeMap<Vec<u8>, UnseqEntryAction> = Default::default();
+                    let _ = entry_actions.insert(
+                        b"key1".to_vec(),
+                        UnseqEntryAction::Update(b"newValue".to_vec()),
+                    );
+                    let _ = entry_actions.insert(b"key2".to_vec(), UnseqEntryAction::Del);
+                    let _ = entry_actions
+                        .insert(b"key3".to_vec(), UnseqEntryAction::Ins(b"value".to_vec()));
+
+                    client3
+                        .mutate_unseq_mdata_entries(name, tag, entry_actions.clone())
+                        .and_then(|_| Ok(()))
+                })
+                .and_then(move |_| {
+                    client4
+                        .list_unseq_mdata_entries(name, tag)
+                        .map(move |fetched_entries| {
+                            let mut expected_entries: BTreeMap<_, _> = Default::default();
+                            let _ = expected_entries.insert(b"key1".to_vec(), b"newValue".to_vec());
+                            let _ = expected_entries.insert(b"key3".to_vec(), b"value".to_vec());
+                            assert_eq!(fetched_entries, expected_entries);
+                        })
+                })
+        });
     }
 }

@@ -630,6 +630,283 @@ impl Vault {
                 }));
                 Ok((Authority::NaeManager(XorName::from_new(name)), payload))
             }
+            Request::SetMDataUserPermissions {
+                address,
+                user,
+                permissions,
+                version,
+                requester,
+                message_id,
+            } => {
+                let result = self
+                    .get_mdata(
+                        Authority::NaeManager(XorName::from_new(address.clone().name())),
+                        address.clone(),
+                        requester.clone(),
+                    )
+                    .and_then(|data| {
+                        let data_name = DataId::mutable(data.name(), data.tag());
+                        match data.clone() {
+                            MutableDataKind::Unsequenced(mut mdata) => {
+                                match mdata.check_permissions(request, requester) {
+                                    Ok(_) => {
+                                        unwrap!(mdata.set_user_permissions(
+                                            user,
+                                            permissions,
+                                            version
+                                        ));
+                                        self.insert_data(
+                                            data_name,
+                                            Data::NewMutable(MutableDataKind::Unsequenced(mdata)),
+                                        );
+                                        self.commit_mutation(&dest);
+                                        Ok(())
+                                    }
+                                    Err(err) => Err(ClientError::NetworkOther(
+                                        err.description().to_string(),
+                                    )),
+                                }
+                            }
+                            MutableDataKind::Sequenced(mut mdata) => {
+                                match mdata.check_permissions(request, requester) {
+                                    Ok(_) => {
+                                        unwrap!(mdata.set_user_permissions(
+                                            user,
+                                            permissions,
+                                            version
+                                        ));
+                                        self.insert_data(
+                                            data_name,
+                                            Data::NewMutable(MutableDataKind::Sequenced(mdata)),
+                                        );
+                                        self.commit_mutation(&dest);
+                                        Ok(())
+                                    }
+                                    Err(err) => Err(ClientError::NetworkOther(
+                                        err.description().to_string(),
+                                    )),
+                                }
+                            }
+                        }
+                    });
+                let payload = unwrap!(serialise(&Response::SetMDataUserPermissions {
+                    res: result,
+                    msg_id: message_id
+                }));
+                Ok((
+                    Authority::NaeManager(XorName::from_new(address.name())),
+                    payload,
+                ))
+            }
+            Request::DelMDataUserPermissions {
+                address,
+                user,
+                version,
+                requester,
+                message_id,
+            } => {
+                let result = self
+                    .get_mdata(
+                        Authority::NaeManager(XorName::from_new(address.clone().name())),
+                        address.clone(),
+                        requester.clone(),
+                    )
+                    .and_then(|data| {
+                        let data_name = DataId::mutable(data.name(), data.tag());
+                        match data.clone() {
+                            MutableDataKind::Unsequenced(mut mdata) => {
+                                match mdata.check_permissions(request, requester) {
+                                    Ok(_) => {
+                                        unwrap!(mdata.del_user_permissions(user, version));
+                                        self.insert_data(
+                                            data_name,
+                                            Data::NewMutable(MutableDataKind::Unsequenced(mdata)),
+                                        );
+                                        self.commit_mutation(&dest);
+                                        Ok(())
+                                    }
+                                    Err(err) => Err(ClientError::NetworkOther(
+                                        err.description().to_string(),
+                                    )),
+                                }
+                            }
+                            MutableDataKind::Sequenced(mut mdata) => {
+                                match mdata.check_permissions(request, requester) {
+                                    Ok(_) => {
+                                        println!("{}", mdata.version());
+                                        unwrap!(mdata.del_user_permissions(user, version));
+                                        self.insert_data(
+                                            data_name,
+                                            Data::NewMutable(MutableDataKind::Sequenced(mdata)),
+                                        );
+                                        self.commit_mutation(&dest);
+                                        Ok(())
+                                    }
+                                    Err(err) => Err(ClientError::NetworkOther(
+                                        err.description().to_string(),
+                                    )),
+                                }
+                            }
+                        }
+                    });
+                let payload = unwrap!(serialise(&Response::DelMDataUserPermissions {
+                    res: result,
+                    msg_id: message_id
+                }));
+                Ok((
+                    Authority::NaeManager(XorName::from_new(address.name())),
+                    payload,
+                ))
+            }
+            Request::ListMDataUserPermissions {
+                address,
+                user,
+                requester,
+                message_id,
+            } => {
+                let result = self
+                    .get_mdata(dest, address.clone(), requester.clone())
+                    .and_then(|data| match data {
+                        MutableDataKind::Unsequenced(mdata) => {
+                            match mdata.check_permissions(request, requester) {
+                                Ok(_) => Ok((*unwrap!(mdata.user_permissions(user))).clone()),
+                                Err(err) => {
+                                    Err(ClientError::NetworkOther(err.description().to_string()))
+                                }
+                            }
+                        }
+                        MutableDataKind::Sequenced(mdata) => {
+                            match mdata.check_permissions(request, requester) {
+                                Ok(_) => Ok((*unwrap!(mdata.user_permissions(user))).clone()),
+                                Err(err) => {
+                                    Err(ClientError::NetworkOther(err.description().to_string()))
+                                }
+                            }
+                        }
+                    });
+                let payload = unwrap!(serialise(&Response::ListMDataUserPermissions {
+                    res: result,
+                    msg_id: message_id
+                }));
+                Ok((dest, payload))
+            }
+            Request::ListMDataPermissions {
+                address,
+                requester,
+                message_id,
+            } => {
+                let result = self
+                    .get_mdata(dest, address.clone(), requester.clone())
+                    .and_then(|data| match data {
+                        MutableDataKind::Unsequenced(mdata) => {
+                            match mdata.check_permissions(request, requester) {
+                                Ok(_) => Ok(mdata.permissions()),
+                                Err(err) => {
+                                    Err(ClientError::NetworkOther(err.description().to_string()))
+                                }
+                            }
+                        }
+                        MutableDataKind::Sequenced(mdata) => {
+                            match mdata.check_permissions(request, requester) {
+                                Ok(_) => Ok(mdata.permissions()),
+                                Err(err) => {
+                                    Err(ClientError::NetworkOther(err.description().to_string()))
+                                }
+                            }
+                        }
+                    });
+                let payload = unwrap!(serialise(&Response::ListMDataPermissions {
+                    res: result,
+                    msg_id: message_id
+                }));
+                Ok((dest, payload))
+            }
+            Request::MutateSeqMDataEntries {
+                address,
+                actions,
+                requester,
+                message_id,
+            } => {
+                let result = self
+                    .get_mdata(
+                        Authority::NaeManager(XorName::from_new(address.clone().name())),
+                        address.clone(),
+                        requester.clone(),
+                    )
+                    .and_then(|data| {
+                        let data_name = DataId::mutable(data.name(), data.tag());
+                        match data.clone() {
+                            MutableDataKind::Sequenced(mut mdata) => {
+                                match mdata.check_permissions(request, requester.clone()) {
+                                    Ok(_) => {
+                                        unwrap!(mdata.mutate_entries(actions, requester));
+                                        self.insert_data(
+                                            data_name,
+                                            Data::NewMutable(MutableDataKind::Sequenced(mdata)),
+                                        );
+                                        self.commit_mutation(&dest);
+                                        Ok(())
+                                    }
+                                    Err(err) => Err(ClientError::NetworkOther(
+                                        err.description().to_string(),
+                                    )),
+                                }
+                            }
+                            _ => Err(ClientError::from("Unexpected data returned")),
+                        }
+                    });
+                let payload = unwrap!(serialise(&Response::MutateSeqMDataEntries {
+                    res: result,
+                    msg_id: message_id
+                }));
+                Ok((
+                    Authority::NaeManager(XorName::from_new(address.name())),
+                    payload,
+                ))
+            }
+            Request::MutateUnseqMDataEntries {
+                address,
+                actions,
+                requester,
+                message_id,
+            } => {
+                let result = self
+                    .get_mdata(
+                        Authority::NaeManager(XorName::from_new(address.clone().name())),
+                        address.clone(),
+                        requester.clone(),
+                    )
+                    .and_then(|data| {
+                        let data_name = DataId::mutable(data.name(), data.tag());
+                        match data.clone() {
+                            MutableDataKind::Unsequenced(mut mdata) => {
+                                match mdata.check_permissions(request, requester.clone()) {
+                                    Ok(_) => {
+                                        unwrap!(mdata.mutate_entries(actions, requester));
+                                        self.insert_data(
+                                            data_name,
+                                            Data::NewMutable(MutableDataKind::Unsequenced(mdata)),
+                                        );
+                                        self.commit_mutation(&dest);
+                                        Ok(())
+                                    }
+                                    Err(err) => Err(ClientError::NetworkOther(
+                                        err.description().to_string(),
+                                    )),
+                                }
+                            }
+                            _ => Err(ClientError::from("Unexpected data returned")),
+                        }
+                    });
+                let payload = unwrap!(serialise(&Response::MutateUnseqMDataEntries {
+                    res: result,
+                    msg_id: message_id
+                }));
+                Ok((
+                    Authority::NaeManager(XorName::from_new(address.name())),
+                    payload,
+                ))
+            }
             _ => {
                 // Dummy return
                 // other requests to be handled by their data type impls
