@@ -360,7 +360,7 @@ pub trait Client: Clone + 'static {
         send_mutation(self, move |routing, dst, msg_id| {
             let request = Request::DeleteMData {
                 address: mdataref.clone(),
-                requester: Requester::Key(requester),
+                requester: Requester::Key(PublicKey::Bls(requester)),
                 message_id: msg_id.to_new(),
             };
             routing.send(client, dst, &unwrap!(serialise(&request)))
@@ -792,7 +792,7 @@ pub trait Client: Clone + 'static {
                 _ => Err(CoreError::ReceivedUnexpectedEvent),
             };
             let result_buffer = unwrap!(res);
-            let res: Response<ClientError> = unwrap!(deserialise(&result_buffer));
+            let res: Response = unwrap!(deserialise(&result_buffer));
             match res {
                 Response::ListMDataUserPermissions { res, .. } => res.map_err(CoreError::from),
                 _ => Err(CoreError::ReceivedUnexpectedEvent),
@@ -919,7 +919,7 @@ pub trait Client: Clone + 'static {
                 _ => Err(CoreError::ReceivedUnexpectedEvent),
             };
             let result_buffer = unwrap!(res);
-            let res: Response<ClientError> = unwrap!(deserialise(&result_buffer));
+            let res: Response = unwrap!(deserialise(&result_buffer));
             match res {
                 Response::ListMDataPermissions { res, .. } => res.map_err(CoreError::from),
                 _ => Err(CoreError::ReceivedUnexpectedEvent),
@@ -1394,8 +1394,8 @@ impl MsgIdConverter for MessageId {
 mod tests {
     use super::*;
     use crate::utils::test_utils::random_client;
-    use safe_nd::XorName as SndXorName;
     use safe_nd::mutable_data::{Action, PermissionSet as NewPermissionSet};
+    use safe_nd::XorName as SndXorName;
 
     #[test]
     pub fn unseq_mdata_test() {
