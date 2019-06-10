@@ -22,6 +22,7 @@ use safe_core::client::{
 use safe_core::crypto::{shared_box, shared_secretbox, shared_sign};
 use safe_core::ipc::BootstrapConfig;
 use safe_core::{Client, ClientKeys, NetworkTx};
+use safe_nd::request::Message;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -211,6 +212,15 @@ impl Client for AppClient {
     fn owner_key(&self) -> Option<sign::PublicKey> {
         let app_inner = self.app_inner.borrow();
         app_inner.owner_key
+    }
+
+    fn compose_message(&self, req: Request, message_id: MessageId) -> Message {
+        let app_inner = self.app_inner.borrow();
+        Message {
+            req,
+            message_id,
+            requester: Requester::Key(app_inner.keys.clone()?.bls_pk),
+        }
     }
 }
 

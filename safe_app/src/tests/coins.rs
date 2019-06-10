@@ -9,11 +9,15 @@
 
 //! Testing Safecoin operations from the apps point of view.
 
-use crate::run;
 use crate::test_utils::create_app;
-// use futures::future::Future;
-// use routing::PublicId;
-// use safe_core::Client;
+use crate::{run, AppError};
+use futures::Future;
+use rand::{self, Rand};
+use routing::XorName;
+use safe_core::{Client, CoreError};
+use safe_nd::{Coins, Error};
+use std::str::FromStr;
+use tiny_keccak::sha3_256;
 
 // Apps should not be able to request the wallet balance if they don't have
 // explicit permissions.
@@ -26,14 +30,40 @@ use crate::test_utils::create_app;
 fn coin_app_deny_permissions() {
     let app = create_app();
 
-    unwrap!(run(&app, |_client, _app_context| {
-        // let wallet = client.owner_key();
+    unwrap!(run(&app, |client, _app_context| {
+        let owner_wallet = XorName(sha3_256(&unwrap!(client.owner_key()).0));
+        let c2 = client.clone();
+        let c3 = client.clone();
 
-        // client.get_balance(wallet).then(move |res| {
-        //     let _ = dbg!(res);
-        //     Ok(())
-        // })
-        Ok(())
+        client
+            .get_balance(owner_wallet)
+            .then(move |res| {
+                match res {
+                    Err(CoreError::NewRoutingClientError(Error::AccessDenied)) => (),
+                    res => panic!("Unexpected result: {:?}", res),
+                }
+
+                c2.transfer_coins(
+                    XorName::rand(&mut rand::thread_rng()),
+                    unwrap!(Coins::from_str("1.0")),
+                    None,
+                )
+            })
+            .then(move |res| {
+                match res {
+                    Err(CoreError::NewRoutingClientError(Error::AccessDenied)) => (),
+                    res => panic!("Unexpected result: {:?}", res),
+                }
+
+                c3.get_transaction(owner_wallet, 1)
+            })
+            .then(move |res| {
+                match res {
+                    Err(CoreError::NewRoutingClientError(Error::AccessDenied)) => (),
+                    res => panic!("Unexpected result: {:?}", res),
+                }
+                Ok::<_, AppError>(())
+            })
     }));
 }
 

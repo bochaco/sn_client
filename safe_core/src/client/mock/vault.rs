@@ -13,17 +13,14 @@ use crate::client::XorNameConverter;
 use crate::config_handler::{Config, DevConfig};
 use fs2::FileExt;
 use maidsafe_utilities::serialisation::{deserialise, serialise};
-use routing::{
-    Authority, ClientError, ImmutableData, MutableData as OldMutableData, PublicId, XorName,
-};
+use routing::{Authority, ClientError, ImmutableData, MutableData as OldMutableData, XorName};
 use rust_sodium::crypto::sign;
 use safe_nd::mutable_data::{
     Action, MutableData as NewMutableData, MutableDataRef, SeqMutableData, UnseqMutableData,
 };
-use safe_nd::request::{Request, Requester};
+use safe_nd::request::{Message, Request, Requester};
 use safe_nd::response::{Response, Transaction};
-use safe_nd::Coins;
-use safe_nd::Error;
+use safe_nd::{Coins, Error};
 use std::collections::HashMap;
 use std::env;
 use std::fs::{File, OpenOptions};
@@ -34,9 +31,6 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 use std::time::SystemTime;
 use tiny_keccak::sha3_256;
-
-// TODO: temp fix
-type ClientPublicId = PublicId;
 
 const FILE_NAME: &str = "MockVault";
 
@@ -332,7 +326,7 @@ impl Vault {
         &mut self,
         src: Authority<XorName>,
         _dest: Authority<XorName>,
-        destination: ClientPublicId,
+        destination: XorName,
         amount: Coins,
         transaction_id: u64,
     ) -> Result<(), Error> {
@@ -346,7 +340,7 @@ impl Vault {
             Some(account) => account.credit_balance(amount, transaction_id)?,
             None => return Err(Error::NoSuchAccount),
         };
-        match self.get_account_mut(&destination.name()) {
+        match self.get_account_mut(&destination) {
             Some(account) => account.debit_balance(amount)?,
             None => return Err(Error::NoSuchAccount),
         };
@@ -356,7 +350,7 @@ impl Vault {
     fn get_transaction(
         &self,
         src: Authority<XorName>,
-        coins_balance_id: ClientPublicId,
+        coins_balance_id: &XorName,
         transaction_id: u64,
     ) -> Result<Transaction, Error> {
         let client_id = if let Authority::Client { client_id, .. } = src {
@@ -366,11 +360,11 @@ impl Vault {
         };
 
         // Check if we're the owner of the account
-        if coins_balance_id != client_id {
+        if coins_balance_id != client_id.name() {
             return Err(Error::AccessDenied);
         }
 
-        let account = match self.get_account(&coins_balance_id.name()) {
+        let account = match self.get_account(coins_balance_id) {
             Some(account) => account,
             None => return Ok(Transaction::NoSuchCoinBalance),
         };
@@ -384,7 +378,7 @@ impl Vault {
     fn get_balance(
         &self,
         src: Authority<XorName>,
-        coins_balance_id: ClientPublicId,
+        coins_balance_id: &XorName,
     ) -> Result<Coins, Error> {
         let client_id = if let Authority::Client { client_id, .. } = src {
             client_id
@@ -393,11 +387,11 @@ impl Vault {
         };
 
         // Check if we're the owner of the account
-        if coins_balance_id != client_id {
+        if coins_balance_id != client_id.name() {
             return Err(Error::AccessDenied);
         }
 
-        let account = match self.get_account(coins_balance_id.name()) {
+        let account = match self.get_account(coins_balance_id) {
             Some(account) => account,
             None => return Err(Error::NoSuchAccount),
         };
@@ -411,26 +405,32 @@ impl Vault {
         dest: Authority<XorName>,
         payload: Vec<u8>,
     ) -> Result<(Authority<XorName>, Vec<u8>), Error> {
-        let request: Request = unwrap!(deserialise(&payload));
+        let Message {
+            request,
+            message_id,
+            requester,
+        } = unwrap!(deserialise(&payload));
         match request {
             Request::TransferCoins {
                 destination,
                 amount,
                 transaction_id,
-                message_id,
             } => {
-                let res = self.transfer_coins(src, dest, destination, amount, transaction_id);
+                let res = self.transfer_coins(
+                    src,
+                    dest,
+                    XorName::from_new(destination),
+                    amount,
+                    transaction_id,
+                );
                 let payload = unwrap!(serialise(&Response::TransferCoins {
                     res,
                     msg_id: message_id
                 }));
                 Ok((dest, payload))
             }
-            Request::GetBalance {
-                coins_balance_id,
-                message_id,
-            } => {
-                let res = self.get_balance(src, coins_balance_id);
+            Request::GetBalance { coins_balance_id } => {
+                let res = self.get_balance(src, &XorName::from_new(coins_balance_id));
                 let payload = unwrap!(serialise(&Response::GetBalance {
                     res,
                     msg_id: message_id
@@ -440,20 +440,16 @@ impl Vault {
             Request::GetTransaction {
                 coins_balance_id,
                 transaction_id,
-                message_id,
             } => {
-                let transaction = self.get_transaction(src, coins_balance_id, transaction_id);
+                let transaction =
+                    self.get_transaction(src, &XorName::from_new(coins_balance_id), transaction_id);
                 let payload = unwrap!(serialise(&Response::GetTransaction {
                     res: transaction,
                     msg_id: message_id,
                 }));
                 Ok((dest, payload))
             }
-            Request::PutUnseqMData {
-                data,
-                requester,
-                message_id,
-            } => {
+            Request::PutUnseqMData { data } => {
                 let result =
                     self.put_mdata(dest, MutableDataKind::Unsequenced(data.clone()), requester);
                 let payload = unwrap!(serialise(&Response::PutUnseqMData {
@@ -465,11 +461,7 @@ impl Vault {
                     payload,
                 ))
             }
-            Request::GetSeqMData {
-                address,
-                requester,
-                message_id,
-            } => {
+            Request::GetSeqMData { address } => {
                 let result = self
                     .get_mdata(dest, address.clone(), requester)
                     .and_then(|data| match data {
@@ -482,11 +474,7 @@ impl Vault {
                 }));
                 Ok((dest, payload))
             }
-            Request::GetUnseqMData {
-                address,
-                requester,
-                message_id,
-            } => {
+            Request::GetUnseqMData { address } => {
                 let result = self
                     .get_mdata(dest, address.clone(), requester)
                     .and_then(|data| match data {
@@ -499,11 +487,7 @@ impl Vault {
                 }));
                 Ok((dest, payload))
             }
-            Request::PutSeqMData {
-                data,
-                requester,
-                message_id,
-            } => {
+            Request::PutSeqMData { data } => {
                 let result =
                     self.put_mdata(dest, MutableDataKind::Sequenced(data.clone()), requester);
                 let payload = unwrap!(serialise(&Response::PutSeqMData {
@@ -515,11 +499,7 @@ impl Vault {
                     payload,
                 ))
             }
-            Request::GetSeqMDataShell {
-                address,
-                requester,
-                message_id,
-            } => {
+            Request::GetSeqMDataShell { address } => {
                 let result = self
                     .get_mdata(dest, address, requester)
                     .and_then(|data| match data {
@@ -532,11 +512,7 @@ impl Vault {
                 }));
                 Ok((dest, payload))
             }
-            Request::GetUnseqMDataShell {
-                address,
-                requester,
-                message_id,
-            } => {
+            Request::GetUnseqMDataShell { address } => {
                 let result = self
                     .get_mdata(dest, address, requester)
                     .and_then(|data| match data {
@@ -549,11 +525,7 @@ impl Vault {
                 }));
                 Ok((dest, payload))
             }
-            Request::GetMDataVersion {
-                address,
-                requester,
-                message_id,
-            } => {
+            Request::GetMDataVersion { address } => {
                 let result = self
                     .get_mdata(dest, address, requester)
                     .and_then(|data| match data {
@@ -566,11 +538,7 @@ impl Vault {
                 }));
                 Ok((dest, payload))
             }
-            Request::ListUnseqMDataEntries {
-                address,
-                requester,
-                message_id,
-            } => {
+            Request::ListUnseqMDataEntries { address } => {
                 let result = self
                     .get_mdata(dest, address.clone(), requester)
                     .and_then(|data| match data {
@@ -583,11 +551,7 @@ impl Vault {
                 }));
                 Ok((dest, payload))
             }
-            Request::ListSeqMDataEntries {
-                address,
-                requester,
-                message_id,
-            } => {
+            Request::ListSeqMDataEntries { address } => {
                 let result = self
                     .get_mdata(dest, address.clone(), requester)
                     .and_then(|data| match data {
@@ -600,11 +564,7 @@ impl Vault {
                 }));
                 Ok((dest, payload))
             }
-            Request::ListMDataKeys {
-                address,
-                requester,
-                message_id,
-            } => {
+            Request::ListMDataKeys { address } => {
                 let result = self
                     .get_mdata(dest, address.clone(), requester)
                     .and_then(|data| match data {
@@ -617,11 +577,7 @@ impl Vault {
                 }));
                 Ok((dest, payload))
             }
-            Request::ListSeqMDataValues {
-                address,
-                requester,
-                message_id,
-            } => {
+            Request::ListSeqMDataValues { address } => {
                 let result = self
                     .get_mdata(dest, address.clone(), requester)
                     .and_then(|data| match data {
@@ -634,11 +590,7 @@ impl Vault {
                 }));
                 Ok((dest, payload))
             }
-            Request::ListUnseqMDataValues {
-                address,
-                requester,
-                message_id,
-            } => {
+            Request::ListUnseqMDataValues { address } => {
                 let result = self
                     .get_mdata(dest, address.clone(), requester)
                     .and_then(|data| match data {
@@ -651,11 +603,7 @@ impl Vault {
                 }));
                 Ok((dest, payload))
             }
-            Request::DeleteMData {
-                address,
-                requester,
-                message_id,
-            } => {
+            Request::DeleteMData { address } => {
                 let name = address.name();
                 let res = self.delete_mdata(dest, address.clone(), requester);
                 let payload = unwrap!(serialise(&Response::DeleteMData {

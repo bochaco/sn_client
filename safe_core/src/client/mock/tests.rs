@@ -24,7 +24,7 @@ use routing::{
 };
 use rust_sodium::crypto::sign;
 use safe_nd::mutable_data::{MutableData as NewMutableData, MutableDataRef, UnseqMutableData};
-use safe_nd::request::{Request as RpcRequest, Requester};
+use safe_nd::request::{Message, Request as RpcRequest, Requester};
 use safe_nd::response::Response as RpcResponse;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
@@ -1054,8 +1054,8 @@ fn unpub_md() {
 
     let message_id = MessageId::new();
 
-    let put_request = RpcRequest::PutUnseqMData {
-        data: data.clone(),
+    let put_request = Message {
+        request: RpcRequest::PutUnseqMData { data: data.clone() },
         requester: Requester::Key(bls_key),
         message_id: message_id.to_new(),
     };
@@ -1065,8 +1065,10 @@ fn unpub_md() {
     let _response = expect_success!(routing_rx, message_id, Response::RpcResponse);
 
     let message_id2 = MessageId::new();
-    let get_request = RpcRequest::GetUnseqMData {
-        address: MutableDataRef::new(name.to_new(), tag),
+    let get_request = Message {
+        request: RpcRequest::GetUnseqMData {
+            address: MutableDataRef::new(name.to_new(), tag),
+        },
         requester: Requester::Key(bls_key),
         message_id: message_id2.to_new(),
     };
