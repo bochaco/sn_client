@@ -356,6 +356,58 @@ pub trait Client: Clone + 'static {
         .into_box()
     }
 
+    /// Fetch the value for a given key in a sequenced mutable data
+    fn get_seq_mdata_value(&self, name: XorName, tag: u64, key: Vec<u8>) -> Box<CoreFuture<Val>> {
+        trace!("Fetch MDataValue for {:?}", name);
+
+        send_new(
+            self,
+            Request::GetSeqMDataValue {
+                address: MutableDataRef::new(name.to_new(), tag),
+                key,
+            },
+        )
+        .and_then(|event| {
+            let res = match event {
+                CoreEvent::RpcResponse(res) => res,
+                _ => Err(CoreError::ReceivedUnexpectedEvent),
+            };
+            let result_buffer = unwrap!(res);
+            let res: Response = unwrap!(deserialise(&result_buffer));
+            match res {
+                Response::GetSeqMDataValue { res, .. } => res.map_err(CoreError::from),
+                _ => Err(CoreError::ReceivedUnexpectedEvent),
+            }
+        })
+        .into_box()
+    }
+
+    /// Fetch the value for a given key in a sequenced mutable data
+    fn get_unseq_mdata_value(&self, name: XorName, tag: u64, key: Vec<u8>) -> Box<CoreFuture<Vec<u8>>> {
+        trace!("Fetch MDataValue for {:?}", name);
+
+        send_new(
+            self,
+            Request::GetUnseqMDataValue {
+                address: MutableDataRef::new(name.to_new(), tag),
+                key,
+            },
+        )
+        .and_then(|event| {
+            let res = match event {
+                CoreEvent::RpcResponse(res) => res,
+                _ => Err(CoreError::ReceivedUnexpectedEvent),
+            };
+            let result_buffer = unwrap!(res);
+            let res: Response = unwrap!(deserialise(&result_buffer));
+            match res {
+                Response::GetUnseqMDataValue { res, .. } => res.map_err(CoreError::from),
+                _ => Err(CoreError::ReceivedUnexpectedEvent),
+            }
+        })
+        .into_box()
+    }
+
     /// Fetch sequenced mutable data from the network
     fn get_seq_mdata(&self, name: XorName, tag: u64) -> Box<CoreFuture<SeqMutableData>> {
         trace!("Fetch entries from  Mutable Data");
@@ -1683,6 +1735,7 @@ mod tests {
             let client2 = client.clone();
             let client3 = client.clone();
             let client4 = client.clone();
+            let client5 = client.clone();
             let name = XorName(rand::random());
             let tag = 15001;
             let mut permissions: BTreeMap<_, _> = Default::default();
@@ -1741,6 +1794,13 @@ mod tests {
                                 .insert(b"key3".to_vec(), Val::new(b"value".to_vec(), 0));
                             assert_eq!(fetched_entries, expected_entries);
                         })
+                }).and_then(move |_| {
+                    client5
+                        .get_seq_mdata_value(name, tag, b"key1".to_vec())
+                        .and_then(|fetched_value| {
+                            assert_eq!(fetched_value, Val::new(b"newValue".to_vec(), 1));
+                            Ok(())
+                        })
                 })
         });
 
@@ -1748,6 +1808,7 @@ mod tests {
             let client2 = client.clone();
             let client3 = client.clone();
             let client4 = client.clone();
+            let client5 = client.clone();
             let name = XorName(rand::random());
             let tag = 15001;
             let mut permissions: BTreeMap<_, _> = Default::default();
@@ -1801,6 +1862,13 @@ mod tests {
                             let _ = expected_entries.insert(b"key1".to_vec(), b"newValue".to_vec());
                             let _ = expected_entries.insert(b"key3".to_vec(), b"value".to_vec());
                             assert_eq!(fetched_entries, expected_entries);
+                        })
+                }).and_then(move |_| {
+                    client5
+                        .get_unseq_mdata_value(name, tag, b"key1".to_vec())
+                        .and_then(|fetched_value| {
+                            assert_eq!(fetched_value, b"newValue".to_vec());
+                            Ok(())
                         })
                 })
         });

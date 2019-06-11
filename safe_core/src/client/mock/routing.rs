@@ -154,6 +154,8 @@ impl Routing {
                     | RpcResponse::GetSeqMDataShell { msg_id, .. }
                     | RpcResponse::GetUnseqMDataShell { msg_id, .. }
                     | RpcResponse::GetMDataVersion { msg_id, .. }
+                    | RpcResponse::GetSeqMDataValue { msg_id, .. }
+                    | RpcResponse::GetUnseqMDataValue { msg_id, .. }
                     | RpcResponse::ListUnseqMDataEntries { msg_id, .. }
                     | RpcResponse::ListSeqMDataEntries { msg_id, .. }
                     | RpcResponse::ListMDataKeys { msg_id, .. }

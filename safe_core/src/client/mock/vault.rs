@@ -418,6 +418,30 @@ impl Vault {
                     payload,
                 ))
             }
+            Request::GetSeqMDataValue { address, key } => {
+                let result = self.get_mdata(dest, address, requester.clone(), request, message_id, Some(true))
+                .and_then(|data| match data {
+                    MutableDataKind::Sequenced(mdata) => Ok(mdata.get(&key).unwrap().clone()),
+                    _ => Err(Error::from("Unexpected data returned"))
+                });
+                let payload = unwrap!(serialise(&Response::GetSeqMDataValue {
+                    res: result,
+                    msg_id: message_id
+                }));
+                Ok((dest, payload))
+            }
+            Request::GetUnseqMDataValue { address, key } => {
+                let result = self.get_mdata(dest, address, requester.clone(), request, message_id, Some(false))
+                .and_then(|data| match data {
+                    MutableDataKind::Unsequenced(mdata) => Ok(mdata.get(&key).unwrap().clone()),
+                    _ => Err(Error::from("Unexpected data returned"))
+                });
+                let payload = unwrap!(serialise(&Response::GetUnseqMDataValue {
+                    res: result,
+                    msg_id: message_id
+                }));
+                Ok((dest, payload))
+            }
             Request::GetSeqMDataShell { address } => {
                 let result = self
                     .get_mdata(dest, address, requester.clone(), request, message_id, Some(true))
