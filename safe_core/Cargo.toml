@@ -11,6 +11,7 @@ version = "0.32.1"
 edition = "2018"
 
 [dependencies]
+bincode = "~1.1.4"
 data-encoding = "~2.1.1"
 chrono = { version = "~0.4.0", features = ["serde"] }
 config_file_handler = "~0.11.0"

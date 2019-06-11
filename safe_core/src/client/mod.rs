@@ -55,7 +55,7 @@ use safe_nd::mutable_data::{
 };
 use safe_nd::request::{Message, Request};
 use safe_nd::response::{Response, Transaction};
-use safe_nd::{AppPermissions, Coins, MessageId as NewMessageId, XorName as NewXorName};
+use safe_nd::{AppPermissions, Coins, MessageId as NewMessageId, XorName as NewXorName, PublicKey};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io;
@@ -419,19 +419,9 @@ pub trait Client: Clone + 'static {
     ) -> Box<CoreFuture<()>> {
         trace!("Mutate MData for {:?}", name);
 
-        let requester = some_or_err!(self.public_bls_key());
-        let client = Authority::Client {
-            client_id: *some_or_err!(self.full_id()).public_id(),
-            proxy_node_name: rand::random(),
-        };
-        send_mutation(self, move |routing, dst, message_id| {
-            let request = Request::MutateSeqMDataEntries {
-                address: MutableDataRef::new(name.to_new(), tag),
-                actions: actions.clone(),
-                requester: Requester::Key(PublicKey::Bls(requester)),
-                message_id: message_id.to_new(),
-            };
-            routing.send(client, dst, &unwrap!(serialise(&request)))
+        send_mutation_new(self, Request::MutateSeqMDataEntries {
+            address: MutableDataRef::new(name.to_new(), tag),
+            actions: actions.clone(),
         })
     }
 
@@ -444,19 +434,9 @@ pub trait Client: Clone + 'static {
     ) -> Box<CoreFuture<()>> {
         trace!("Mutate MData for {:?}", name);
 
-        let requester = some_or_err!(self.public_bls_key());
-        let client = Authority::Client {
-            client_id: *some_or_err!(self.full_id()).public_id(),
-            proxy_node_name: rand::random(),
-        };
-        send_mutation(self, move |routing, dst, message_id| {
-            let request = Request::MutateUnseqMDataEntries {
-                address: MutableDataRef::new(name.to_new(), tag),
-                actions: actions.clone(),
-                requester: Requester::Key(PublicKey::Bls(requester)),
-                message_id: message_id.to_new(),
-            };
-            routing.send(client, dst, &unwrap!(serialise(&request)))
+        send_mutation_new(self, Request::MutateUnseqMDataEntries {
+            address: MutableDataRef::new(name.to_new(), tag),
+            actions: actions.clone(),
         })
     }
 
@@ -629,7 +609,19 @@ pub trait Client: Clone + 'static {
             Request::ListSeqMDataEntries {
                 address: MutableDataRef::new(name.to_new(), tag),
             }
+        ).and_then(|event| {
+            let res = match event {
+                CoreEvent::RpcResponse(res) => res,
+                _ => Err(CoreError::ReceivedUnexpectedEvent),
+            };
+            let result_buffer = unwrap!(res);
+            let res: Response = unwrap!(deserialise(&result_buffer));
+            match res {
+                Response::ListSeqMDataEntries { res, .. } => res.map_err(CoreError::from),
+                _ => Err(CoreError::ReceivedUnexpectedEvent),
+            }
         })
+        .into_box()
     }
 
     /// Return a list of keys in `MutableData` stored on the network.
@@ -703,24 +695,9 @@ pub trait Client: Clone + 'static {
     ) -> Box<CoreFuture<NewPermissionSet>> {
         trace!("GetMDataUserPermissions for {:?}", name);
 
-        let requester = some_or_err!(self.public_bls_key());
-        let client = Authority::Client {
-            client_id: *some_or_err!(self.full_id()).public_id(),
-            proxy_node_name: rand::random(),
-        };
-        send(self, move |routing, msg_id| {
-            let request = Request::ListMDataUserPermissions {
-                address: MutableDataRef::new(name.to_new(), tag),
-                user: user.clone(),
-                requester: Requester::Key(PublicKey::Bls(requester)),
-                message_id: msg_id.to_new(),
-            };
-
-            routing.send(
-                client,
-                Authority::NaeManager(name),
-                &unwrap!(serialise(&request)),
-            )
+        send_new(self, Request::ListMDataUserPermissions {
+            address: MutableDataRef::new(name.to_new(), tag),
+            user: user.clone(),
         })
         .and_then(|event| {
             let res = match event {
@@ -823,23 +800,8 @@ pub trait Client: Clone + 'static {
     ) -> Box<CoreFuture<BTreeMap<PublicKey, NewPermissionSet>>> {
         trace!("List MDataPermissions for {:?}", name);
 
-        let requester = some_or_err!(self.public_bls_key());
-        let client = Authority::Client {
-            client_id: *some_or_err!(self.full_id()).public_id(),
-            proxy_node_name: rand::random(),
-        };
-        send(self, move |routing, msg_id| {
-            let request = Request::ListMDataPermissions {
-                address: MutableDataRef::new(name.to_new(), tag),
-                requester: Requester::Key(PublicKey::Bls(requester)),
-                message_id: msg_id.to_new(),
-            };
-
-            routing.send(
-                client,
-                Authority::NaeManager(name),
-                &unwrap!(serialise(&request)),
-            )
+        send_new(self, Request::ListMDataPermissions {
+            address: MutableDataRef::new(name.to_new(), tag),
         })
         .and_then(|event| {
             let res = match event {
@@ -912,21 +874,11 @@ pub trait Client: Clone + 'static {
     ) -> Box<CoreFuture<()>> {
         trace!("SetMDataUserPermissions for {:?}", name);
 
-        let requester = some_or_err!(self.public_bls_key());
-        let client = Authority::Client {
-            client_id: *some_or_err!(self.full_id()).public_id(),
-            proxy_node_name: rand::random(),
-        };
-        send_mutation(self, move |routing, dst, message_id| {
-            let request = Request::SetMDataUserPermissions {
-                address: MutableDataRef::new(name.to_new(), tag),
-                user: user.clone(),
-                permissions: permissions.clone(),
-                version,
-                requester: Requester::Key(PublicKey::Bls(requester)),
-                message_id: message_id.to_new(),
-            };
-            routing.send(client, dst, &unwrap!(serialise(&request)))
+        send_mutation_new(self, Request::SetMDataUserPermissions {
+            address: MutableDataRef::new(name.to_new(), tag),
+            user: user.clone(),
+            permissions: permissions.clone(),
+            version,
         })
     }
 
@@ -940,20 +892,10 @@ pub trait Client: Clone + 'static {
     ) -> Box<CoreFuture<()>> {
         trace!("DelMDataUserPermissions for {:?}", name);
 
-        let requester = some_or_err!(self.public_bls_key());
-        let client = Authority::Client {
-            client_id: *some_or_err!(self.full_id()).public_id(),
-            proxy_node_name: rand::random(),
-        };
-        send_mutation(self, move |routing, dst, message_id| {
-            let request = Request::DelMDataUserPermissions {
-                address: MutableDataRef::new(name.to_new(), tag),
-                user: user.clone(),
-                version,
-                requester: Requester::Key(PublicKey::Bls(requester)),
-                message_id: message_id.to_new(),
-            };
-            routing.send(client, dst, &unwrap!(serialise(&request)))
+        send_mutation_new(self, Request::DelMDataUserPermissions {
+            address: MutableDataRef::new(name.to_new(), tag),
+            user: user.clone(),
+            version,
         })
     }
 
@@ -1236,10 +1178,7 @@ where
                     | Response::MutateSeqMDataEntries { res, .. }
                     | Response::MutateUnseqMDataEntries { res, .. }
                     | Response::PutSeqMData { res, .. }
-                    | Response::TransferCoins { res, .. }
-                    | Response::PutUnseqMData { res, .. }
-                    | Response::PutSeqMData { res, .. }
-                    | Response::DeleteMData { res, .. } => res.map_err(CoreError::from),
+                    | Response::TransferCoins { res, .. }=> res.map_err(CoreError::from),
                     _ => Err(CoreError::ReceivedUnexpectedEvent),
                 }
             }
