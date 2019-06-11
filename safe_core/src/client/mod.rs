@@ -1365,6 +1365,9 @@ mod tests {
     use safe_nd::{Coins, Error, XorName as SndXorName};
     use std::str::FromStr;
 
+    // 1. Create unseq. mdata with some entries and perms and put it on the network
+    // 2. Fetch the shell version, entries, keys, values anv verify them
+    // 3. Fetch the entire. data object and verify
     #[test]
     pub fn unseq_mdata_test() {
         let _ = random_client(move |client| {
@@ -1397,6 +1400,8 @@ mod tests {
             client
                 .put_unseq_mutable_data(data.clone())
                 .and_then(move |_| {
+                    println!("Put unseq. MData successfully");
+
                     client3
                         .get_mdata_version_new(name, tag)
                         .map(move |version| assert_eq!(version, 0))
@@ -1419,7 +1424,6 @@ mod tests {
                         .map(move |values| assert_eq!(values, entries_values))
                 })
                 .and_then(move |_| {
-                    println!("Put unseq. MData successfully");
 
                     client2
                         .get_unseq_mdata(XorName::from_new(*data.name()), data.tag())
@@ -1433,6 +1437,9 @@ mod tests {
         });
     }
 
+    // 1. Create an put seq. mdata on the network with some entries and permissions.
+    // 2. Fetch the shell version, entries, keys, values anv verify them
+    // 3. Fetch the entire. data object and verify
     #[test]
     pub fn seq_mdata_test() {
         let _ = random_client(move |client| {
@@ -1503,8 +1510,9 @@ mod tests {
         });
     }
 
+    // 1. Put seq. mdata on the network and then delete it
+    // 2. Try getting the data object. It should panic
     #[test]
-    #[should_panic]
     pub fn del_seq_mdata_test() {
         let _ = random_client(move |client| {
             let client2 = client.clone();
@@ -1527,17 +1535,24 @@ mod tests {
                         assert_eq!(result, ());
                     })
                 })
-                .and_then(move |_| {
-                    client3.get_seq_mdata(XorName::from_new(*data.name()), data.tag())
+                .then(move |_| {
+                    client3.get_unseq_mdata(XorName::from_new(*data.name()), data.tag())
+                    .then(move |res| {
+                        match res {
+                            Err(CoreError::NewRoutingClientError(Error::NoSuchData)) => (),
+                            _ => panic!("Unexpected success"),
+                        }
+                        Ok::<_, Error>(())
+                    })
                 })
-                .then(|res| res)
         });
     }
 
+    // 1. Put unseq. mdata on the network and then delete it
+    // 2. Try getting the data object. It should panic
     #[test]
-    #[should_panic]
     pub fn del_unseq_mdata_test() {
-        let _ = random_client(move |client| {
+        random_client(move |client| {
             let client2 = client.clone();
             let client3 = client.clone();
             let name = SndXorName(rand::random());
@@ -1554,14 +1569,22 @@ mod tests {
             client
                 .put_unseq_mutable_data(data.clone())
                 .and_then(move |_| {
-                    client2.delete_mdata(mdataref).map(move |result| {
+                    client2.delete_mdata(mdataref)
+                    .and_then(move |result| {
                         assert_eq!(result, ());
+                        Ok(())
                     })
                 })
-                .and_then(move |_| {
+                .then(move |_| {
                     client3.get_unseq_mdata(XorName::from_new(*data.name()), data.tag())
+                    .then(move |res| {
+                        match res {
+                            Err(CoreError::NewRoutingClientError(Error::NoSuchData)) => (),
+                            _ => panic!("Unexpected success"),
+                        }
+                        Ok::<_, Error>(())
+                    })
                 })
-                .then(|res| res)
         });
     }
 
@@ -1634,8 +1657,9 @@ mod tests {
         });
     }
 
+    // 1. Create a client that PUTs some mdata on the network
+    // 2. Create a different client that tries to delete the data. It should panic.
     #[test]
-    #[should_panic]
     pub fn del_unseq_mdata_permission_test() {
         let name = SndXorName(rand::random());
         let tag = 15001;
@@ -1653,9 +1677,22 @@ mod tests {
             client.put_unseq_mutable_data(data.clone()).then(|res| res)
         });
 
-        random_client(move |client1| client1.delete_mdata(mdataref).map_err(CoreError::from));
+        random_client(move |client| {
+            client.delete_mdata(mdataref)
+            .then(|res| {
+                match res {
+                    Err(CoreError::NewRoutingClientError(Error::AccessDenied)) => (),
+                    res => panic!("Unexpected result: {:?}", res),
+                }
+                Ok::<_, Error>(())
+            })
+        });
     }
 
+    // 1. Create a mutable data with some permissions and store it on the network.
+    // 2. Modify the permissions of a user in the permission set.
+    // 3. Fetch the list of permissions and verify the edit.
+    // 4. Delete a user's permissions from the permission set and verify the deletion.
     #[test]
     pub fn mdata_permissions_test() {
         random_client(|client| {
@@ -1729,6 +1766,10 @@ mod tests {
         })
     }
 
+    // 1. Create a mutable data and store it on the network
+    // 2. Create some entry actions and mutate the data on the network.
+    // 3. List the entries and verify that the mutation was applied.
+    // 4. Fetch a value for a particular key and verify
     #[test]
     pub fn mdata_mutations_test() {
         random_client(|client| {
