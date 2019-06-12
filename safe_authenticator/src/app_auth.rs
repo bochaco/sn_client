@@ -268,7 +268,9 @@ fn authenticate_new_app(
 
     client
         .list_auth_keys_and_version()
-        .and_then(move |(_, version)| recovery::ins_auth_key(&c2, app_keys.sign_pk, version + 1))
+        .and_then(move |(_, version)| {
+            recovery::ins_auth_key(&c2, app_keys.sign_pk, Default::default(), version + 1)
+        })
         .map_err(AuthError::from)
         .and_then(move |_| {
             if permissions.is_empty() {

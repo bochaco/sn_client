@@ -30,6 +30,7 @@
     clippy::wrong_pub_self_convention,
     deprecated,
     improper_ctypes,
+//    missing_docs,
     non_shorthand_field_patterns,
     overflowing_literals,
     plugin_as_library,

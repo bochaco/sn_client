@@ -23,6 +23,8 @@ use routing::{
 };
 use rust_sodium::crypto::sign::Seed;
 use rust_sodium::crypto::{box_, sign};
+use safe_nd::MessageId as NewMessageId;
+use safe_nd::request::{Request, Requester, Message};
 use safe_core::client::account::Account;
 use safe_core::client::{
     setup_routing, spawn_routing_thread, ClientInner, IMMUT_DATA_CACHE_SIZE, REQUEST_TIMEOUT_SECS,
@@ -527,6 +529,20 @@ impl Client for AuthClient {
     fn owner_key(&self) -> Option<sign::PublicKey> {
         let auth_inner = self.auth_inner.borrow();
         Some(auth_inner.acc.maid_keys.sign_pk)
+    }
+
+    fn compose_message(&self, request: Request) -> Message {
+        let message_id = NewMessageId::new();
+
+        let sig = self
+            .secret_bls_key().unwrap()
+            .sign(&unwrap!(bincode::serialize(&(&request, message_id))));
+
+        Message {
+            request,
+            message_id,
+            requester: Requester::Owner(sig),
+        }
     }
 }
 
