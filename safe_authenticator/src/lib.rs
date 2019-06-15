@@ -26,7 +26,6 @@
     bad_style,
     deprecated,
     improper_ctypes,
-    missing_docs,
     non_shorthand_field_patterns,
     overflowing_literals,
     plugin_as_library,
@@ -85,13 +84,13 @@ pub use ffi::ipc::*;
 pub use ffi::logging::*;
 pub use ffi::*;
 
-mod access_container;
-mod app_auth;
-mod app_container;
+pub mod access_container;
+pub mod app_auth;
+pub mod app_container;
 mod client;
-mod config;
-mod errors;
-mod ipc;
+pub mod config;
+pub mod errors;
+pub mod ipc;
 mod std_dirs;
 #[cfg(test)]
 mod tests;
