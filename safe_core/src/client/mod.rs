@@ -429,7 +429,7 @@ pub trait Client: Clone + 'static {
                 match res {
                     Response::GetIData(res) => match res {
                         Ok(IData::Pub(data)) => Ok(data),
-                        Ok(IData::Unpub(_)) => Err(CoreError::ReceivedUnexpectedEvent),
+                        Ok(IData::Unpub(_)) => Err(CoreError::ReceivedUnexpectedData),
                         Err(e) => Err(e).map_err(CoreError::from),
                     },
                     _ => Err(CoreError::ReceivedUnexpectedEvent),
@@ -459,7 +459,7 @@ pub trait Client: Clone + 'static {
                 match res {
                     Response::GetIData(res) => match res {
                         Ok(IData::Unpub(data)) => Ok(data),
-                        Ok(IData::Pub(_)) => Err(CoreError::ReceivedUnexpectedEvent),
+                        Ok(IData::Pub(_)) => Err(CoreError::ReceivedUnexpectedData),
                         Err(e) => Err(e).map_err(CoreError::from),
                     },
                     _ => Err(CoreError::ReceivedUnexpectedEvent),
@@ -502,7 +502,7 @@ pub trait Client: Clone + 'static {
                     Response::GetMData(res) => {
                         res.map_err(CoreError::from).and_then(|mdata| match mdata {
                             MData::Unseq(data) => Ok(data),
-                            _ => Err(CoreError::ReceivedUnexpectedData),
+                            MData::Seq(_) => Err(CoreError::ReceivedUnexpectedData),
                         })
                     }
                     _ => Err(CoreError::ReceivedUnexpectedEvent),
@@ -584,7 +584,7 @@ pub trait Client: Clone + 'static {
                     Response::GetMData(res) => {
                         res.map_err(CoreError::from).and_then(|mdata| match mdata {
                             MData::Seq(data) => Ok(data),
-                            _ => Err(CoreError::ReceivedUnexpectedData),
+                            MData::Unseq(_) => Err(CoreError::ReceivedUnexpectedData),
                         })
                     }
                     _ => Err(CoreError::ReceivedUnexpectedEvent),
@@ -2523,6 +2523,7 @@ mod tests {
     // 1. Create a client with a wallet. Create an anonymous wallet preloading it from the client's wallet.
     // 2. Transfer some safecoin from the anonymous wallet to the client.
     // 3. Fetch the balances of both the wallets and verify them.
+    // 4. Try to create a balance using an inexistent wallet. This should fail.
     #[test]
     fn anonymous_wallet() {
         random_client(move |client| {
@@ -2530,6 +2531,7 @@ mod tests {
             let client2 = client.clone();
             let client3 = client.clone();
             let client4 = client.clone();
+            let client5 = client.clone();
             let bls_sk = threshold_crypto::SecretKey::random();
             let bls_sk2 = bls_sk.clone();
             let wallet1: XorName = unwrap!(client.owner_key()).into();
@@ -2572,6 +2574,24 @@ mod tests {
                         assert_eq!(balance, unwrap!(Coins::from_str("405.0")));
                         Ok(())
                     })
+                })
+                .and_then(move |_| {
+                    let random_key = threshold_crypto::SecretKey::random();
+                    let random_pk = PublicKey::from(random_key.public_key());
+                    client5
+                        .create_balance(
+                            Some(&random_key),
+                            random_pk,
+                            unwrap!(Coins::from_str("100.0")),
+                            None,
+                        )
+                        .then(|res| {
+                            match res {
+                                Err(CoreError::NewRoutingClientError(SndError::NoSuchBalance)) => {}
+                                res => panic!("Unexpected result: {:?}", res),
+                            }
+                            Ok(())
+                        })
                 })
         });
     }
