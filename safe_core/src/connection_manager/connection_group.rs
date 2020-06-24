@@ -320,11 +320,7 @@ impl Connected {
         trace!("Sending message {:?}", msg_id);
 
         let (sender_future, response_future) = oneshot::channel();
-        let expected_responses = if is_get_request(&msg) {
-            self.elders.len()
-        } else {
-            self.elders.len() / 2 + 1
-        };
+        let expected_responses = self.elders.len();
 
         let _ = self
             .response_manager
