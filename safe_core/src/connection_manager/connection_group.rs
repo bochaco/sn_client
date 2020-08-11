@@ -9,16 +9,17 @@
 use crate::{client::SafeKey, CoreError};
 use bincode::{deserialize, serialize};
 use bytes::Bytes;
-use log::{error, info, trace};
+use futures::{future::join_all, lock::Mutex};
+use log::{error, trace};
 use quic_p2p::{self, Config as QuicP2pConfig, Connection, QuicP2pAsync};
 use safe_nd::{HandshakeRequest, HandshakeResponse, Message, PublicId, Response};
-use std::net::SocketAddr;
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 /// Encapsulates multiple QUIC connections with a group of nodes. Accumulates responses.
 pub(super) struct ConnectionGroup {
     full_id: SafeKey,
     quic_p2p: QuicP2pAsync,
-    elders: Vec<Connection>,
+    elders: Vec<Arc<Mutex<Connection>>>,
 }
 
 impl ConnectionGroup {
@@ -75,177 +76,138 @@ impl ConnectionGroup {
     }
 
     async fn connect_to_elders(&mut self, elders_addrs: Vec<SocketAddr>) -> Result<(), CoreError> {
-        // TODO: connect to all Elders in parallel
-        let peer_addr = elders_addrs[0];
-
-        let mut conn = self.quic_p2p.connect_to(peer_addr).await?;
-
-        let handshake = HandshakeRequest::Join(self.full_id.public_id());
-        let msg = Bytes::from(serialize(&handshake)?);
-        let join_response = conn.send(msg).await?;
-        match deserialize(&join_response) {
-            Ok(HandshakeResponse::Challenge(PublicId::Node(node_public_id), challenge)) => {
-                trace!(
-                    "Got the challenge from {:?}, public id: {}",
-                    peer_addr,
-                    node_public_id
-                );
-                let response = HandshakeRequest::ChallengeResult(self.full_id.sign(&challenge));
-                let msg = Bytes::from(serialize(&response)?);
-                conn.send_only(msg).await?;
-                self.elders = vec![conn];
-                Ok(())
-            }
-            Ok(_) => Err(CoreError::from(format!(
-                "Unexpected message type while expeccting challenge from Elder."
-            ))),
-            Err(e) => Err(CoreError::from(format!("Unexpected error {:?}", e))),
+        // Connect to all Elders concurrently
+        // We spawn a task per each node to connect to
+        let mut tasks = Vec::default();
+        for peer_addr in elders_addrs {
+            let mut quic_p2p = self.quic_p2p.clone();
+            let full_id = self.full_id.clone();
+            let task_handle = tokio::spawn(async move {
+                let mut conn = quic_p2p.connect_to(peer_addr).await?;
+                let handshake = HandshakeRequest::Join(full_id.public_id());
+                let msg = Bytes::from(serialize(&handshake)?);
+                let join_response = conn.send(msg).await?;
+                match deserialize(&join_response) {
+                    Ok(HandshakeResponse::Challenge(PublicId::Node(node_public_id), challenge)) => {
+                        trace!(
+                            "Got the challenge from {:?}, public id: {}",
+                            peer_addr,
+                            node_public_id
+                        );
+                        let response = HandshakeRequest::ChallengeResult(full_id.sign(&challenge));
+                        let msg = Bytes::from(serialize(&response)?);
+                        conn.send_only(msg).await?;
+                        Ok(Arc::new(Mutex::new(conn)))
+                    }
+                    Ok(_) => Err(CoreError::from(format!(
+                        "Unexpected message type while expeccting challenge from Elder."
+                    ))),
+                    Err(e) => Err(CoreError::from(format!("Unexpected error {:?}", e))),
+                }
+            });
+            tasks.push(task_handle);
         }
+
+        // Let's await for them to all successfully connect, or fail if at least one failed
+        let conn_results = join_all(tasks).await;
+
+        // We can now keep each of the connections in our instance
+        for join_result in conn_results.into_iter() {
+            if let Ok(conn_result) = join_result {
+                let conn = conn_result.map_err(|err| {
+                    CoreError::from(format!("Failed to connect to an Elder: {}", err))
+                })?;
+
+                self.elders.push(conn);
+            }
+        }
+
+        trace!("Connected to {} Elders.", self.elders.len());
+        Ok(())
     }
 
     pub async fn send(&mut self, msg: &Message) -> Result<Response, CoreError> {
         trace!("Sending message to Elders...");
         let msg_bytes = Bytes::from(serialize(&msg)?);
 
-        // TODO: send to all elders in parallel and find majority on responses
-        let response = self.elders[0].send(msg_bytes).await?;
+        // We send the same message to all elders in parallel
+        // and we try to find a majority on the responses
+        let mut tasks = Vec::default();
+        for elder_conn in &self.elders {
+            let msg_bytes_clone = msg_bytes.clone();
+            let conn = Arc::clone(elder_conn);
+            let task_handle = tokio::spawn(async move {
+                let response = conn.lock().await.send(msg_bytes_clone).await?;
+                match deserialize(&response) {
+                    Ok(Message::Response {
+                        response,
+                        message_id,
+                    }) => {
+                        trace!(
+                            "Response received: msg_id: {:?}, resp: {:?}",
+                            message_id,
+                            response
+                        );
+                        Ok(response)
+                    }
+                    Ok(Message::Notification { notification }) => {
+                        let err_msg = format!(
+                            "Unexpectedly received a transaction notification: {:?}",
+                            notification
+                        );
+                        trace!("{}", err_msg);
+                        Err(CoreError::Unexpected(err_msg))
+                    }
+                    Ok(_) => {
+                        let err_msg =
+                            "Unexpected message type when expecting a 'Response'.".to_string();
+                        error!("{}", err_msg);
+                        Err(CoreError::Unexpected(err_msg))
+                    }
+                    Err(e) => {
+                        let err_msg = format!("Unexpected error: {:?}", e);
+                        error!("{}", err_msg);
+                        Err(CoreError::Unexpected(err_msg))
+                    }
+                }
+            });
+            tasks.push(task_handle);
+        }
 
-        match deserialize(&response) {
-            Ok(Message::Response {
-                response,
-                message_id,
-            }) => {
-                trace!(
-                    "Response received: msg_id: {:?}, resp: {:?}",
-                    message_id,
-                    response
-                );
-                Ok(response)
-            }
-            Ok(Message::Notification { notification }) => {
-                let err_msg = format!(
-                    "Unexpectedly received a transaction notification: {:?}",
-                    notification
-                );
-                trace!("{}", err_msg);
-                Err(CoreError::Unexpected(err_msg))
-            }
-            Ok(_) => {
-                let err_msg = "Unexpected message type when expecting a 'Response'.".to_string();
-                error!("{}", err_msg);
-                Err(CoreError::Unexpected(err_msg))
-            }
-            Err(e) => {
-                let err_msg = format!("Unexpected error: {:?}", e);
-                error!("{}", err_msg);
-                Err(CoreError::Unexpected(err_msg))
+        // Let's await for all responses
+        // TODO: await only for a majority
+        let responses = join_all(tasks).await;
+
+        // Let's figure out what's the value which is in the majority of responses obtained
+        let mut votes_map = HashMap::<Response, usize>::default();
+        let mut winner: (Option<Response>, usize) = (None, 0);
+        for join_result in responses.into_iter() {
+            if let Ok(response_result) = join_result {
+                let response: Response = response_result.map_err(|err| {
+                    CoreError::from(format!(
+                        "Failed to obtain a response from the network: {}",
+                        err
+                    ))
+                })?;
+
+                let counter = votes_map.entry(response.clone()).or_insert(0);
+                *counter += 1;
+                if *counter > winner.1 {
+                    winner = (Some(response), *counter);
+                }
             }
         }
+
+        // TODO: return an error if we didn't successfully got enough number
+        // of responses to represent a majority of Elders
+
+        trace!(
+            "Response obtained from majority {} of nodes: {:?}",
+            winner.1,
+            winner.0
+        );
+        winner.0.ok_or_else(|| {
+            CoreError::from(format!("Failed to obtain a response from the network."))
+        })
     }
 }
-/*
-
-struct Connected {
-    elders: HashMap<SocketAddr, Elder>,
-    response_manager: ResponseManager,
-}
-
-impl Connected {
-    fn new(old_state: Joining) -> Self {
-        // trigger the connection future
-        let _ = old_state.connection_hook.send(Ok(()));
-
-        let response_threshold: usize = old_state.connected_elders.len() / 2 + 1;
-
-        Self {
-            response_manager: ResponseManager::new(response_threshold),
-            elders: old_state
-                .connected_elders
-                .into_iter()
-                .map(|(k, v)| (k, v.elder))
-                .collect(),
-        }
-    }
-
-    fn terminate(self, quic_p2p: &mut QuicP2pAsync) {
-        for peer in self.elders.values().map(Elder::peer) {
-            //quic_p2p.disconnect_from(peer.peer_addr());
-        }
-    }
-
-    async fn send(
-        &mut self,
-        quic_p2p: &mut QuicP2pAsync,
-        msg_id: MessageId,
-        msg: &Message,
-    ) -> Result<oneshot::Receiver<Response>, CoreError> {
-        trace!("Sending message {:?}", msg_id);
-
-        let (sender_future, response_future) = oneshot::channel();
-        let expected_responses = if is_get_request(&msg) {
-            self.elders.len()
-        } else {
-            self.elders.len() / 2 + 1
-        };
-
-        let _ = self
-            .response_manager
-            .await_responses(msg_id, (sender_future, expected_responses));
-
-        let bytes = Bytes::from(unwrap!(serialize(msg)));
-        {
-            for peer in self.elders.values().map(Elder::peer) {
-                let token = rand::random();
-                quic_p2p.send(peer, bytes.clone(), token).await;
-            }
-        }
-
-        Ok(response_future)
-    }
-
-    fn handle_new_message(
-        &mut self,
-        _quic_p2p: &mut QuicP2pAsync,
-        peer_addr: SocketAddr,
-        msg: Bytes,
-    ) -> Transition {
-        trace!("{}: Message: {}.", peer_addr, utils::bin_data_format(&msg),);
-
-        match deserialize(&msg) {
-            Ok(Message::Response {
-                response,
-                message_id,
-            }) => {
-                trace!(
-                    "Response from: {:?}, msg_id: {:?}, resp: {:?}",
-                    peer_addr,
-                    message_id,
-                    response
-                );
-                let _ = self.response_manager.handle_response(message_id, response);
-            }
-            Ok(Message::Notification { notification }) => {
-                trace!("Got transaction notification: {:?}", notification);
-            }
-            Ok(_msg) => error!("Unexpected message type, expected response."),
-            Err(e) => {
-                error!("Unexpected error: {:?}", e);
-            }
-        }
-
-        Transition::None
-    }
-}
-
-// Returns true when a message holds a GET request.
-fn is_get_request(msg: &Message) -> bool {
-    if let Message::Request { request, .. } = msg {
-        match request.get_type() {
-            RequestType::PublicGet | RequestType::PrivateGet => true,
-            _ => false,
-        }
-    } else {
-        false
-    }
-}
-*/

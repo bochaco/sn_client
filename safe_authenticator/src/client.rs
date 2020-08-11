@@ -368,36 +368,36 @@ impl AuthClient {
             Self::prepare_account_packet_update(*acc_loc, account, keys, &account_packet_id)?;
 
         let mut client_inner = self.inner.lock().await;
-/*
-        let mut cm = client_inner.cm().clone();
-        let mut cm2 = cm.clone();
-        let mut cm4 = cm.clone();
+        /*
+                let mut cm = client_inner.cm().clone();
+                let mut cm2 = cm.clone();
+                let mut cm4 = cm.clone();
 
-        let message_id = MessageId::new();
-        let request = Request::LoginPacket(LoginPacketRequest::Update(updated_packet));
-        let signature =
-            account_packet_id.sign(&unwrap!(bincode::serialize(&(&request, message_id))));
+                let message_id = MessageId::new();
+                let request = Request::LoginPacket(LoginPacketRequest::Update(updated_packet));
+                let signature =
+                    account_packet_id.sign(&unwrap!(bincode::serialize(&(&request, message_id))));
 
-        let account_pub_id2 = account_pub_id.clone();
+                let account_pub_id2 = account_pub_id.clone();
 
-        futures::executor::block_on(cm.bootstrap(account_packet_id))?;
+                futures::executor::block_on(cm.bootstrap(account_packet_id))?;
 
-        let resp = futures::executor::block_on(cm2.send(
-            &account_pub_id,
-            &Message::Request {
-                request,
-                message_id,
-                signature: Some(signature),
-            },
-        ))?;
+                let resp = futures::executor::block_on(cm2.send(
+                    &account_pub_id,
+                    &Message::Request {
+                        request,
+                        message_id,
+                        signature: Some(signature),
+                    },
+                ))?;
 
-        let _resp = match resp {
-            Response::Mutation(res) => res.map_err(CoreError::from),
-            _ => return Err(AuthError::from(CoreError::from("Unexpected response"))),
-        };
+                let _resp = match resp {
+                    Response::Mutation(res) => res.map_err(CoreError::from),
+                    _ => return Err(AuthError::from(CoreError::from("Unexpected response"))),
+                };
 
-        cm4.disconnect(&account_pub_id2).await?;
-*/
+                cm4.disconnect(&account_pub_id2).await?;
+        */
         Ok(())
     }
 

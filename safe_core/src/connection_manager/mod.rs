@@ -12,7 +12,7 @@ use tokio::time::timeout;
 
 use crate::{client::SafeKey, network_event::NetworkEvent, network_event::NetworkTx, CoreError};
 use connection_group::ConnectionGroup;
-use log::{error, trace};
+use log::trace;
 use quic_p2p::Config as QuicP2pConfig;
 use safe_nd::{Message, PublicId, Response};
 use std::{

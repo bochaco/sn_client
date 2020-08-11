@@ -36,7 +36,7 @@ use crate::connection_manager::ConnectionManager;
 use crate::crypto::{shared_box, shared_secretbox};
 use crate::errors::CoreError;
 use crate::ipc::BootstrapConfig;
-use crate::network_event::{NetworkEvent, NetworkTx};
+use crate::network_event::NetworkTx;
 use futures::{channel::mpsc, lock::Mutex};
 use std::sync::Arc;
 
