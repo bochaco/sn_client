@@ -18,8 +18,8 @@ pub mod blob_apis;
 /// Safe Transfers wrapper, with token APIs
 pub mod transfer_actor;
 
-/// Sequence APIs
-pub mod sequence_apis;
+/// Register APIs
+pub mod register_apis;
 
 /// Blob storage for self encryption.
 pub mod blob_storage;
@@ -58,14 +58,10 @@ pub const ELDER_SIZE: usize = 5;
 /// Capacity of the immutable data cache.
 pub const IMMUT_DATA_CACHE_SIZE: usize = 300;
 
-/// Capacity of the Sequence CRDT local replica size.
-pub const SEQUENCE_CRDT_REPLICA_SIZE: usize = 300;
-
 /// Client object
 #[derive(Clone)]
 pub struct Client {
     keypair: Keypair,
-    /// Sequence CRDT replica
     transfer_actor: Arc<Mutex<SafeTransferActor<ClientTransferValidator, Keypair>>>,
     //replicas_pk_set: PublicKeySet,
     simulated_farming_payout_dot: Dot<PublicKey>,

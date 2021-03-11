@@ -29,7 +29,7 @@ mod tests {
     use crate::{errors::TransfersError, utils::test_utils::create_test_client_with};
     use anyhow::{bail, Result};
     use rand::rngs::OsRng;
-    use sn_data_types::{Keypair, Sequence};
+    use sn_data_types::{Keypair, Register};
     use xor_name::XorName;
 
     #[cfg(feature = "simulated-payouts")]
@@ -37,13 +37,7 @@ mod tests {
     pub async fn transfer_actor_with_no_balance_cannot_store_data() -> Result<()> {
         let keypair = Keypair::new_ed25519(&mut OsRng);
         let authority = keypair.public_key();
-        let data = Sequence::new_public(
-            authority,
-            authority.to_string(),
-            XorName::random(),
-            33323,
-            None,
-        );
+        let data = Register::new_public(authority, XorName::random(), 33323, None);
 
         let initial_actor = create_test_client_with(Some(keypair)).await?;
         match initial_actor.pay_and_write_sequence_to_network(data).await {

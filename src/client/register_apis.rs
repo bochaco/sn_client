@@ -9,18 +9,18 @@
 use crate::{connection_manager::ConnectionManager, errors::Error, Client};
 use log::{debug, trace};
 use sn_data_types::{
-    PublicKey, Sequence, SequenceAddress, SequenceEntries, SequenceEntry, SequenceIndex,
-    SequencePermissions, SequencePrivatePermissions, SequencePrivatePolicy,
-    SequencePublicPermissions, SequencePublicPolicy, SequenceUser,
+    PublicKey, Register, RegisterAddress, RegisterEntries, RegisterEntry, RegisterIndex,
+    RegisterNodeId, RegisterPermissions, RegisterPrivatePermissions, RegisterPrivatePolicy,
+    RegisterPublicPermissions, RegisterPublicPolicy, RegisterUser,
 };
 use sn_messaging::client::{
-    Cmd, DataCmd, DataQuery, Query, QueryResponse, SequenceRead, SequenceWrite,
+    Cmd, DataCmd, DataQuery, Query, QueryResponse, RegisterRead, RegisterWrite,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use xor_name::XorName;
 
-fn wrap_seq_read(read: SequenceRead) -> Query {
-    Query::Data(DataQuery::Sequence(read))
+fn wrap_seq_read(read: RegisterRead) -> Query {
+    Query::Data(DataQuery::Register(read))
 }
 
 impl Client {
@@ -28,7 +28,7 @@ impl Client {
     // Write Operations
     //---------------------
 
-    /// Create Private Sequence Data on to the Network
+    /// Create Private Register Data on to the Network
     ///
     /// Creates a private sequence on the network which can be appended to.
     /// Private data can be removed from the network at a later date.
@@ -44,7 +44,7 @@ impl Client {
     /// # extern crate tokio; use anyhow::Result; use std::str::FromStr;
     /// # use sn_client::utils::test_utils::read_network_conn_info;
     /// use sn_client::Client;
-    /// use sn_data_types::{Keypair, PublicKey, Token, SequencePrivatePermissions};
+    /// use sn_data_types::{Keypair, PublicKey, Token, RegisterPrivatePermissions};
     /// use std::collections::BTreeMap;
     /// use xor_name::XorName;
     /// use rand::rngs::OsRng;
@@ -58,12 +58,12 @@ impl Client {
     /// let name = XorName::random();
     /// let tag = 10;
     /// let owner = client.public_key().await;
-    /// let mut perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
+    /// let mut perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
     ///
     /// // Set the access permissions
     /// let _ = perms.insert(
     ///    owner,
-    ///    SequencePrivatePermissions::new(true, true),
+    ///    RegisterPrivatePermissions::new(true, true),
     /// );
     ///
     /// // The returned address can then be used to `append` data to.
@@ -72,21 +72,22 @@ impl Client {
     /// ```
     pub async fn store_private_sequence(
         &self,
-        sequence: Option<SequenceEntries>,
+        sequence: Option<RegisterEntries>,
         name: XorName,
         tag: u64,
         owner: PublicKey,
-        permissions: BTreeMap<PublicKey, SequencePrivatePermissions>,
-    ) -> Result<SequenceAddress, Error> {
-        trace!("Store Private Sequence Data {:?}", name);
+        permissions: BTreeMap<PublicKey, RegisterPrivatePermissions>,
+    ) -> Result<RegisterAddress, Error> {
+        trace!("Store Private Register Data {:?}", name);
         let pk = self.public_key().await;
-        let policy = SequencePrivatePolicy { owner, permissions };
-        let mut data = Sequence::new_private(pk, pk.to_string(), name, tag, Some(policy));
+        let policy = RegisterPrivatePolicy { owner, permissions };
+        let mut data = Register::new_private(pk, name, tag, Some(policy));
         let address = *data.address();
 
         if let Some(entries) = sequence {
             for entry in entries {
-                let mut op = data.create_unsigned_append_op(entry)?;
+                // FIXME: parents should possibly be linking to previous entry
+                let mut op = data.create_unsigned_append_op(entry, BTreeSet::new())?;
                 let bytes = bincode::serialize(&op.crdt_op)?;
                 let signature = self.keypair.sign(&bytes);
                 op.signature = Some(signature);
@@ -99,7 +100,7 @@ impl Client {
         Ok(address)
     }
 
-    /// Create Public Sequence Data into the Network
+    /// Create Public Register Data into the Network
     ///
     /// Creates a public sequence on the network which can be appended to.
     /// Public data can _not_ be removed from the network at a later date.
@@ -115,7 +116,7 @@ impl Client {
     /// # extern crate tokio; use anyhow::Result; use std::str::FromStr;
     /// # use sn_client::utils::test_utils::read_network_conn_info;
     /// use sn_client::Client;
-    /// use sn_data_types::{Keypair, SequenceUser, Token, SequencePublicPermissions};
+    /// use sn_data_types::{Keypair, RegisterUser, Token, RegisterPublicPermissions};
     /// use std::collections::BTreeMap;
     /// use xor_name::XorName;
     /// use rand::rngs::OsRng;
@@ -129,12 +130,12 @@ impl Client {
     /// let name = XorName::random();
     /// let tag = 10;
     /// let owner = client.public_key().await;
-    /// let mut perms = BTreeMap::<SequenceUser, SequencePublicPermissions>::new();
+    /// let mut perms = BTreeMap::<RegisterUser, RegisterPublicPermissions>::new();
     ///
     /// // Set the access permissions
     /// let _ = perms.insert(
-    ///    SequenceUser::Key(owner),
-    ///    SequencePublicPermissions::new(true),
+    ///    RegisterUser::Key(owner),
+    ///    RegisterPublicPermissions::new(true),
     /// );
     ///
     /// // The returned address can then be used to `append` data to.
@@ -143,21 +144,22 @@ impl Client {
     /// ```
     pub async fn store_public_sequence(
         &self,
-        sequence: Option<SequenceEntries>,
+        sequence: Option<RegisterEntries>,
         name: XorName,
         tag: u64,
         owner: PublicKey,
-        permissions: BTreeMap<SequenceUser, SequencePublicPermissions>,
-    ) -> Result<SequenceAddress, Error> {
-        trace!("Store Public Sequence Data {:?}", name);
+        permissions: BTreeMap<RegisterUser, RegisterPublicPermissions>,
+    ) -> Result<RegisterAddress, Error> {
+        trace!("Store Public Register Data {:?}", name);
         let pk = self.public_key().await;
-        let policy = SequencePublicPolicy { owner, permissions };
-        let mut data = Sequence::new_public(pk, pk.to_string(), name, tag, Some(policy));
+        let policy = RegisterPublicPolicy { owner, permissions };
+        let mut data = Register::new_public(pk, name, tag, Some(policy));
         let address = *data.address();
 
         if let Some(entries) = sequence {
             for entry in entries {
-                let mut op = data.create_unsigned_append_op(entry)?;
+                // FIXME: parents should probably link to previous inserted entry
+                let mut op = data.create_unsigned_append_op(entry, BTreeSet::new())?;
                 let bytes = bincode::serialize(&op.crdt_op)?;
                 let signature = self.keypair.sign(&bytes);
                 op.signature = Some(signature);
@@ -172,7 +174,7 @@ impl Client {
 
     /// Delete sequence
     ///
-    /// You're only able to delete a PrivateSequence. Public data can no be removed from the network.
+    /// You're only able to delete a PrivateRegister. Public data can no be removed from the network.
     ///
     /// # Examples
     ///
@@ -182,7 +184,7 @@ impl Client {
     /// # extern crate tokio; use anyhow::Result; use std::str::FromStr;
     /// # use sn_client::utils::test_utils::read_network_conn_info;
     /// use sn_client::Client;
-    /// use sn_data_types::{Keypair, PublicKey, Token, SequencePrivatePermissions};
+    /// use sn_data_types::{Keypair, PublicKey, Token, RegisterPrivatePermissions};
     /// use std::collections::BTreeMap;
     /// use xor_name::XorName;
     /// use rand::rngs::OsRng;
@@ -196,12 +198,12 @@ impl Client {
     /// let name = XorName::random();
     /// let tag = 10;
     /// let owner = client.public_key().await;
-    /// let mut perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
+    /// let mut perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
     ///
     /// // Set the access permissions
     /// let _ = perms.insert(
     ///    owner,
-    ///    SequencePrivatePermissions::new(true, true),
+    ///    RegisterPrivatePermissions::new(true, true),
     /// );
     ///
     /// // The returned address can then be used to `append` data to.
@@ -210,8 +212,8 @@ impl Client {
     /// client.delete_sequence(address).await?;
     /// # let balance_after_write = client.get_local_balance().await; assert_ne!(initial_balance, balance_after_write); Ok(()) } ); }
     /// ```
-    pub async fn delete_sequence(&self, address: SequenceAddress) -> Result<(), Error> {
-        let cmd = DataCmd::Sequence(SequenceWrite::Delete(address));
+    pub async fn delete_sequence(&self, address: RegisterAddress) -> Result<(), Error> {
+        let cmd = DataCmd::Register(RegisterWrite::Delete(address));
         // Payment for PUT
         let payment_proof = self.create_write_payment_proof(&cmd).await?;
 
@@ -229,7 +231,7 @@ impl Client {
         self.apply_write_payment_to_local_actor(payment_proof).await
     }
 
-    /// Append to Sequence
+    /// Append to Register
     ///
     /// Public or private isn't important for append. You can append to either (though the data you append will be Public or Private).
     ///
@@ -238,7 +240,7 @@ impl Client {
     /// # extern crate tokio; use anyhow::Result; use std::str::FromStr;
     /// # use sn_client::utils::test_utils::read_network_conn_info;
     /// use sn_client::Client;
-    /// use sn_data_types::{Keypair, PublicKey, Token, SequencePrivatePermissions};
+    /// use sn_data_types::{Keypair, PublicKey, Token, RegisterPrivatePermissions};
     /// use std::collections::BTreeMap;
     /// use xor_name::XorName;
     /// use rand::rngs::OsRng;
@@ -252,12 +254,12 @@ impl Client {
     /// let name = XorName::random();
     /// let tag = 10;
     /// let owner = client.public_key().await;
-    /// let mut perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
+    /// let mut perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
     ///
     /// // Set the access permissions
     /// let _ = perms.insert(
     ///    owner,
-    ///    SequencePrivatePermissions::new(true, true),
+    ///    RegisterPrivatePermissions::new(true, true),
     /// );
     ///
     /// // The returned address can then be used to `append` data to.
@@ -268,22 +270,23 @@ impl Client {
     /// ```
     pub async fn append_to_sequence(
         &self,
-        address: SequenceAddress,
-        entry: SequenceEntry,
+        address: RegisterAddress,
+        entry: RegisterEntry,
+        parents: BTreeSet<RegisterNodeId>,
     ) -> Result<(), Error> {
         // First we fetch it so we can get the causality info,
         // either from local CRDT replica or from the network if not found
         let mut sequence = self.get_sequence(address).await?;
 
-        // We can now append the entry to the Sequence
-        let mut op = sequence.create_unsigned_append_op(entry)?;
+        // We can now append the entry to the Register
+        let mut op = sequence.create_unsigned_append_op(entry, parents)?;
         let bytes = bincode::serialize(&op.crdt_op)?;
         let signature = self.keypair.sign(&bytes);
         op.signature = Some(signature);
         sequence.apply_op(op.clone())?;
 
         // Finally we can send the mutation to the network's replicas
-        let cmd = DataCmd::Sequence(SequenceWrite::Edit(op));
+        let cmd = DataCmd::Register(RegisterWrite::Edit(op));
 
         self.pay_and_send_data_command(cmd).await
     }
@@ -292,26 +295,26 @@ impl Client {
     /// Wraps msg_contents for payment validation and mutation
     pub(crate) async fn pay_and_write_sequence_to_network(
         &self,
-        data: Sequence,
+        data: Register,
     ) -> Result<(), Error> {
         debug!("Attempting to pay and write data to network");
-        let cmd = DataCmd::Sequence(SequenceWrite::New(data));
+        let cmd = DataCmd::Register(RegisterWrite::New(data));
 
         self.pay_and_send_data_command(cmd).await
     }
 
     //----------------------
-    // Get Sequence
+    // Get Register
     //---------------------
 
-    /// Get Sequence Data from the Network
+    /// Get Register Data from the Network
     ///
     /// # Examples
     /// ```no_run
     /// # extern crate tokio; use anyhow::Result; use std::str::FromStr;
     /// # use sn_client::utils::test_utils::read_network_conn_info;
     /// use sn_client::Client;
-    /// use sn_data_types::{Keypair, PublicKey, Token, SequencePrivatePermissions};
+    /// use sn_data_types::{Keypair, PublicKey, Token, RegisterPrivatePermissions};
     /// use std::collections::BTreeMap;
     /// use xor_name::XorName;
     /// use rand::rngs::OsRng;
@@ -325,12 +328,12 @@ impl Client {
     /// let name = XorName::random();
     /// let tag = 10;
     /// let owner = client.public_key().await;
-    /// let mut perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
+    /// let mut perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
     ///
     /// // Set the access permissions
     /// let _ = perms.insert(
     ///    owner,
-    ///    SequencePrivatePermissions::new(true, true),
+    ///    RegisterPrivatePermissions::new(true, true),
     /// );
     ///
     /// // The returned address can then be used to `append` data to.
@@ -340,28 +343,28 @@ impl Client {
     ///
     /// # let balance_after_write = client.get_local_balance().await; assert_ne!(initial_balance, balance_after_write); Ok(()) } ); }
     /// ```
-    pub async fn get_sequence(&self, address: SequenceAddress) -> Result<Sequence, Error> {
-        trace!("Get Sequence Data at {:?}", address.name());
-        // Let's fetch the Sequence from the network
+    pub async fn get_sequence(&self, address: RegisterAddress) -> Result<Register, Error> {
+        trace!("Get Register Data at {:?}", address.name());
+        // Let's fetch the Register from the network
         let sequence = match self
-            .send_query(wrap_seq_read(SequenceRead::Get(address)))
+            .send_query(wrap_seq_read(RegisterRead::Get(address)))
             .await?
         {
-            QueryResponse::GetSequence(res) => res.map_err(Error::from),
+            QueryResponse::GetRegister(res) => res.map_err(Error::from),
             _ => Err(Error::ReceivedUnexpectedEvent),
         }?;
 
         Ok(sequence)
     }
 
-    /// Get the last data entry from a Sequence Data.
+    /// Get the last data entry from a Register Data.
     ///
     /// # Examples
     /// ```no_run
     /// # extern crate tokio; use anyhow::Result; use std::str::FromStr;
     /// # use sn_client::utils::test_utils::read_network_conn_info;
     /// use sn_client::Client;
-    /// use sn_data_types::{Keypair, PublicKey, Token, SequencePrivatePermissions};
+    /// use sn_data_types::{Keypair, PublicKey, Token, RegisterPrivatePermissions};
     /// use std::collections::BTreeMap;
     /// use xor_name::XorName;
     /// use rand::rngs::OsRng;
@@ -375,12 +378,12 @@ impl Client {
     /// let name = XorName::random();
     /// let tag = 10;
     /// let owner = client.public_key().await;
-    /// let mut perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
+    /// let mut perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
     ///
     /// // Set the access permissions
     /// let _ = perms.insert(
     ///    owner,
-    ///    SequencePrivatePermissions::new(true, true),
+    ///    RegisterPrivatePermissions::new(true, true),
     /// );
     ///
     /// // The returned address can then be used to `append` data to.
@@ -397,10 +400,10 @@ impl Client {
     /// ```
     pub async fn get_sequence_last_entry(
         &self,
-        address: SequenceAddress,
-    ) -> Result<(u64, SequenceEntry), Error> {
+        address: RegisterAddress,
+    ) -> Result<(u64, RegisterEntry), Error> {
         trace!(
-            "Get latest entry from Sequence Data at {:?}",
+            "Get latest entry from Register Data at {:?}",
             address.name()
         );
 
@@ -412,14 +415,14 @@ impl Client {
         }
     }
 
-    /// Get Sequence Data from the Network at a specific version
+    /// Get Register Data from the Network at a specific version
     ///
     /// # Examples
     /// ```no_run
     /// # extern crate tokio; use anyhow::Result; use std::str::FromStr;
     /// # use sn_client::utils::test_utils::read_network_conn_info;
     /// use sn_client::Client;
-    /// use sn_data_types::{Keypair, PublicKey, Token, SequencePrivatePermissions};
+    /// use sn_data_types::{Keypair, PublicKey, Token, RegisterPrivatePermissions};
     /// use std::collections::BTreeMap;
     /// use xor_name::XorName;
     /// use rand::rngs::OsRng;
@@ -433,12 +436,12 @@ impl Client {
     /// let name = XorName::random();
     /// let tag = 10;
     /// let owner = client.public_key().await;
-    /// let mut perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
+    /// let mut perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
     ///
     /// // Set the access permissions
     /// let _ = perms.insert(
     ///    owner,
-    ///    SequencePrivatePermissions::new(true, true),
+    ///    RegisterPrivatePermissions::new(true, true),
     /// );
     ///
     /// // The returned address can then be used to `append` data to.
@@ -454,31 +457,31 @@ impl Client {
     /// ```
     pub async fn get_sequence_entry(
         &self,
-        address: SequenceAddress,
+        address: RegisterAddress,
         index_from_start: u64,
-    ) -> Result<SequenceEntry, Error> {
+    ) -> Result<RegisterEntry, Error> {
         trace!(
-            "Get entry at index {:?} from Sequence Data {:?}",
+            "Get entry at index {:?} from Register Data {:?}",
             index_from_start,
             address.name()
         );
 
         let sequence = self.get_sequence(address).await?;
-        let index = SequenceIndex::FromStart(index_from_start);
+        let index = RegisterIndex::FromStart(index_from_start);
         match sequence.get(index, None)? {
             Some(entry) => Ok(entry.to_vec()),
             None => Err(Error::from(sn_data_types::Error::NoSuchEntry)),
         }
     }
 
-    /// Get a set of Entries for the requested range from a Sequence.
+    /// Get a set of Entries for the requested range from a Register.
     ///
     /// # Examples
     /// ```no_run
     /// # extern crate tokio; use anyhow::Result; use std::str::FromStr;
     /// # use sn_client::utils::test_utils::read_network_conn_info;
     /// use sn_client::Client;
-    /// use sn_data_types::{Keypair, PublicKey, Token, SequencePrivatePermissions, SequenceIndex};
+    /// use sn_data_types::{Keypair, PublicKey, Token, RegisterPrivatePermissions, RegisterIndex};
     /// use std::collections::BTreeMap;
     /// use xor_name::XorName;
     /// use rand::rngs::OsRng;
@@ -492,12 +495,12 @@ impl Client {
     /// let name = XorName::random();
     /// let tag = 10;
     /// let owner = client.public_key().await;
-    /// let mut perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
+    /// let mut perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
     ///
     /// // Set the access permissions
     /// let _ = perms.insert(
     ///    owner,
-    ///    SequencePrivatePermissions::new(true, true),
+    ///    RegisterPrivatePermissions::new(true, true),
     /// );
     ///
     /// // The returned address can then be used to `append` data to.
@@ -507,7 +510,7 @@ impl Client {
     /// client.append_to_sequence(address, b"Third Entry Value".to_vec()).await?;
     ///
     /// // Now we can retrieve the alst entry in the sequence:
-    /// let entries = client.get_sequence_range(address, (SequenceIndex::FromStart(1), SequenceIndex::FromEnd(0) )).await?;
+    /// let entries = client.get_sequence_range(address, (RegisterIndex::FromStart(1), RegisterIndex::FromEnd(0) )).await?;
     ///
     /// assert_eq!(entries[0], b"Another New Entry Value".to_vec());
     /// assert_eq!(entries[1], b"Third Entry Value".to_vec());
@@ -516,11 +519,11 @@ impl Client {
     /// ```
     pub async fn get_sequence_range(
         &self,
-        address: SequenceAddress,
-        range: (SequenceIndex, SequenceIndex),
-    ) -> Result<SequenceEntries, Error> {
+        address: RegisterAddress,
+        range: (RegisterIndex, RegisterIndex),
+    ) -> Result<RegisterEntries, Error> {
         trace!(
-            "Get range of entries from Sequence Data at {:?}",
+            "Get range of entries from Register Data at {:?}",
             address.name()
         );
 
@@ -535,14 +538,14 @@ impl Client {
     // Ownership
     //---------------------
 
-    /// Get the owner of a Sequence.
+    /// Get the owner of a Register.
     ///
     /// # Examples
     /// ```no_run
     /// # extern crate tokio; use anyhow::Result; use std::str::FromStr;
     /// # use sn_client::utils::test_utils::read_network_conn_info;
     /// use sn_client::Client;
-    /// use sn_data_types::{Keypair, PublicKey, Token, SequencePrivatePermissions};
+    /// use sn_data_types::{Keypair, PublicKey, Token, RegisterPrivatePermissions};
     /// use std::collections::BTreeMap;
     /// use xor_name::XorName;
     /// use rand::rngs::OsRng;
@@ -556,12 +559,12 @@ impl Client {
     /// let name = XorName::random();
     /// let tag = 10;
     /// let owner = client.public_key().await;
-    /// let mut perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
+    /// let mut perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
     ///
     /// // Set the access permissions
     /// let _ = perms.insert(
     ///    owner,
-    ///    SequencePrivatePermissions::new(true, true),
+    ///    RegisterPrivatePermissions::new(true, true),
     /// );
     ///
     /// // The returned address can then be used to `append` data to.
@@ -571,8 +574,8 @@ impl Client {
     /// assert_eq!(seq_owner, owner);
     /// # let balance_after_write = client.get_local_balance().await; assert_ne!(initial_balance, balance_after_write); Ok(()) } ); }
     /// ```
-    pub async fn get_sequence_owner(&self, address: SequenceAddress) -> Result<PublicKey, Error> {
-        trace!("Get owner of the Sequence Data at {:?}", address.name());
+    pub async fn get_sequence_owner(&self, address: RegisterAddress) -> Result<PublicKey, Error> {
+        trace!("Get owner of the Register Data at {:?}", address.name());
 
         // TODO: perhaps we want to grab it directly from the network and update local replica
         let sequence = self.get_sequence(address).await?;
@@ -591,7 +594,7 @@ impl Client {
     // Permissions
     //---------------------
 
-    /// Get the set of Permissions of a Public Sequence.
+    /// Get the set of Permissions of a Public Register.
     ///
     /// # Examples
     ///
@@ -599,7 +602,7 @@ impl Client {
     /// # extern crate tokio; use anyhow::Result; use std::str::FromStr;
     /// # use sn_client::utils::test_utils::read_network_conn_info;
     /// use sn_client::Client;
-    /// use sn_data_types::{Keypair, Token, SequenceUser,SequencePublicPermissions};
+    /// use sn_data_types::{Keypair, Token, RegisterUser,RegisterPublicPermissions};
     /// use std::collections::BTreeMap;
     /// use xor_name::XorName;
     /// use rand::rngs::OsRng;
@@ -613,12 +616,12 @@ impl Client {
     /// let name = XorName::random();
     /// let tag = 10;
     /// let owner = client.public_key().await;
-    /// let mut perms = BTreeMap::<SequenceUser, SequencePublicPermissions>::new();
+    /// let mut perms = BTreeMap::<RegisterUser, RegisterPublicPermissions>::new();
     ///
     /// // Set the access permissions
     /// let _ = perms.insert(
-    ///    SequenceUser::Key(owner),
-    ///    SequencePublicPermissions::new(true),
+    ///    RegisterUser::Key(owner),
+    ///    RegisterPublicPermissions::new(true),
     /// );
     ///
     /// // The returned address can then be used to `append` data to.
@@ -629,11 +632,11 @@ impl Client {
     /// ```
     pub async fn get_sequence_public_permissions_for_user(
         &self,
-        address: SequenceAddress,
+        address: RegisterAddress,
         user: PublicKey,
-    ) -> Result<SequencePublicPermissions, Error> {
+    ) -> Result<RegisterPublicPermissions, Error> {
         trace!(
-            "Get permissions from Public Sequence Data at {:?}",
+            "Get permissions from Public Register Data at {:?}",
             address.name()
         );
 
@@ -642,17 +645,17 @@ impl Client {
         let sequence = self.get_sequence(address).await?;
         // TODO: do we need to query with some specific PK?
         let perms = match sequence
-            .permissions(SequenceUser::Key(user), None)
+            .permissions(RegisterUser::Key(user), None)
             .map_err(Error::from)?
         {
-            SequencePermissions::Public(perms) => perms,
+            RegisterPermissions::Public(perms) => perms,
             _ => return Err(Error::NotPublicPermissions),
         };
 
         Ok(perms)
     }
 
-    /// Get the set of Permissions of a Private Sequence.
+    /// Get the set of Permissions of a Private Register.
     ///
     /// # Examples
     ///
@@ -660,7 +663,7 @@ impl Client {
     /// # extern crate tokio; use anyhow::Result; use std::str::FromStr;
     /// # use sn_client::utils::test_utils::read_network_conn_info;
     /// use sn_client::Client;
-    /// use sn_data_types::{Keypair, PublicKey, Token, SequencePrivatePermissions};
+    /// use sn_data_types::{Keypair, PublicKey, Token, RegisterPrivatePermissions};
     /// use std::collections::BTreeMap;
     /// use xor_name::XorName;
     /// use rand::rngs::OsRng;
@@ -674,12 +677,12 @@ impl Client {
     /// let name = XorName::random();
     /// let tag = 10;
     /// let owner = client.public_key().await;
-    /// let mut perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
+    /// let mut perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
     ///
     /// // Set the access permissions
     /// let _ = perms.insert(
     ///    owner,
-    ///    SequencePrivatePermissions::new(true, true),
+    ///    RegisterPrivatePermissions::new(true, true),
     /// );
     ///
     /// // The returned address can then be used to `append` data to.
@@ -690,28 +693,28 @@ impl Client {
     /// ```
     pub async fn get_sequence_private_permissions_for_user(
         &self,
-        address: SequenceAddress,
+        address: RegisterAddress,
         user: PublicKey,
-    ) -> Result<SequencePrivatePermissions, Error> {
+    ) -> Result<RegisterPrivatePermissions, Error> {
         trace!(
-            "Get permissions from Private Sequence Data at {:?}",
+            "Get permissions from Private Register Data at {:?}",
             address.name()
         );
         let sequence = self.get_sequence(address).await?;
 
         // TODO: do we need to query with some specific PK?
         let perms = match sequence
-            .permissions(SequenceUser::Key(user), None)
+            .permissions(RegisterUser::Key(user), None)
             .map_err(Error::from)?
         {
-            SequencePermissions::Private(perms) => perms,
+            RegisterPermissions::Private(perms) => perms,
             _ => return Err(Error::NotPrivatePermissions),
         };
 
         Ok(perms)
     }
 
-    /// Get the set of Permissions for a specific user in a Sequence.
+    /// Get the set of Permissions for a specific user in a Register.
     ///
     /// # Examples
     ///
@@ -719,7 +722,7 @@ impl Client {
     /// # extern crate tokio; use anyhow::Result; use std::str::FromStr;
     /// # use sn_client::utils::test_utils::read_network_conn_info;
     /// use sn_client::Client;
-    /// use sn_data_types::{Keypair, PublicKey, Token, SequencePrivatePermissions};
+    /// use sn_data_types::{Keypair, PublicKey, Token, RegisterPrivatePermissions};
     /// use std::collections::BTreeMap;
     /// use xor_name::XorName;
     /// use rand::rngs::OsRng;
@@ -733,12 +736,12 @@ impl Client {
     /// let name = XorName::random();
     /// let tag = 10;
     /// let owner = client.public_key().await;
-    /// let mut perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
+    /// let mut perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
     ///
     /// // Set the access permissions
     /// let _ = perms.insert(
     ///    owner,
-    ///    SequencePrivatePermissions::new(true, true),
+    ///    RegisterPrivatePermissions::new(true, true),
     /// );
     ///
     /// // The returned address can then be used to `append` data to.
@@ -749,11 +752,11 @@ impl Client {
     /// ```
     pub async fn get_sequence_permissions(
         &self,
-        address: SequenceAddress,
-        user: SequenceUser,
-    ) -> Result<SequencePermissions, Error> {
+        address: RegisterAddress,
+        user: RegisterUser,
+    ) -> Result<RegisterPermissions, Error> {
         trace!(
-            "Get permissions for user {:?} from Sequence Data at {:?}",
+            "Get permissions for user {:?} from Register Data at {:?}",
             user,
             address.name()
         );
@@ -773,9 +776,9 @@ mod tests {
     use super::*;
     use crate::utils::test_utils::{create_test_client, gen_ed_keypair};
     use anyhow::{anyhow, bail, Result};
-    use sn_data_types::{Error as DtError, SequenceAction, SequencePrivatePermissions, Token};
+    use sn_data_types::{Error as DtError, RegisterAction, RegisterPrivatePermissions, Token};
     use sn_messaging::client::Error as ErrorMessage;
-    use std::str::FromStr;
+    use std::{collections::BTreeSet, str::FromStr};
     use tokio::time::{delay_for, Duration};
     use xor_name::XorName;
 
@@ -785,7 +788,7 @@ mod tests {
         let tag = 10;
         let client = create_test_client().await?;
         let owner = client.public_key().await;
-        let perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
+        let perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
         let sequence_address = client
             .store_private_sequence(None, name, tag, owner, perms)
             .await?;
@@ -811,7 +814,7 @@ mod tests {
         Ok(())
     }
 
-    /// Sequence data tests ///
+    /// Register data tests ///
 
     #[tokio::test]
     pub async fn sequence_basics() -> Result<()> {
@@ -821,9 +824,9 @@ mod tests {
         let tag = 15000;
         let owner = client.public_key().await;
 
-        // store a Private Sequence
-        let mut perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
-        let _ = perms.insert(owner, SequencePrivatePermissions::new(true, true));
+        // store a Private Register
+        let mut perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
+        let _ = perms.insert(owner, RegisterPrivatePermissions::new(true, true));
         let address = client
             .store_private_sequence(None, name, tag, owner, perms)
             .await?;
@@ -842,9 +845,9 @@ mod tests {
         assert_eq!(sequence.tag(), tag);
         assert_eq!(sequence.len(None)?, 0);
 
-        // store a Public Sequence
-        let mut perms = BTreeMap::<SequenceUser, SequencePublicPermissions>::new();
-        let _ = perms.insert(SequenceUser::Anyone, SequencePublicPermissions::new(true));
+        // store a Public Register
+        let mut perms = BTreeMap::<RegisterUser, RegisterPublicPermissions>::new();
+        let _ = perms.insert(RegisterUser::Anyone, RegisterPublicPermissions::new(true));
         let address = client
             .store_public_sequence(None, name, tag, owner, perms)
             .await?;
@@ -872,8 +875,8 @@ mod tests {
         let name = XorName(rand::random());
         let tag = 15000;
         let owner = client.public_key().await;
-        let mut perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
-        let _ = perms.insert(owner, SequencePrivatePermissions::new(true, true));
+        let mut perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
+        let _ = perms.insert(owner, RegisterPrivatePermissions::new(true, true));
         let address = client
             .store_private_sequence(None, name, tag, owner, perms)
             .await?;
@@ -902,25 +905,25 @@ mod tests {
 
         let user_perms = seq_res?;
 
-        assert!(user_perms.is_allowed(SequenceAction::Read));
-        assert!(user_perms.is_allowed(SequenceAction::Append));
+        assert!(user_perms.is_allowed(RegisterAction::Read));
+        assert!(user_perms.is_allowed(RegisterAction::Append));
 
         let mut seq_res = client
-            .get_sequence_permissions(address, SequenceUser::Key(owner))
+            .get_sequence_permissions(address, RegisterUser::Key(owner))
             .await;
         while seq_res.is_err() {
             delay_for(Duration::from_millis(200)).await;
             seq_res = client
-                .get_sequence_permissions(address, SequenceUser::Key(owner))
+                .get_sequence_permissions(address, RegisterUser::Key(owner))
                 .await;
         }
 
         match seq_res? {
-            SequencePermissions::Private(user_perms) => {
-                assert!(user_perms.is_allowed(SequenceAction::Read));
-                assert!(user_perms.is_allowed(SequenceAction::Append));
+            RegisterPermissions::Private(user_perms) => {
+                assert!(user_perms.is_allowed(RegisterAction::Read));
+                assert!(user_perms.is_allowed(RegisterAction::Append));
             }
-            SequencePermissions::Public(_) => return Err(Error::IncorrectPermissions.into()),
+            RegisterPermissions::Public(_) => return Err(Error::IncorrectPermissions.into()),
         }
 
         let other_user = gen_ed_keypair().public_key();
@@ -937,7 +940,7 @@ mod tests {
         }
 
         match client
-            .get_sequence_permissions(address, SequenceUser::Key(other_user))
+            .get_sequence_permissions(address, RegisterUser::Key(other_user))
             .await
         {
             Err(Error::NetworkDataError(DtError::NoSuchEntry)) => Ok(()),
@@ -955,10 +958,10 @@ mod tests {
         let name = XorName(rand::random());
         let tag = 15000;
         let owner = client.public_key().await;
-        let mut perms = BTreeMap::<SequenceUser, SequencePublicPermissions>::new();
+        let mut perms = BTreeMap::<RegisterUser, RegisterPublicPermissions>::new();
         let _ = perms.insert(
-            SequenceUser::Key(owner),
-            SequencePublicPermissions::new(None),
+            RegisterUser::Key(owner),
+            RegisterPublicPermissions::new(None),
         );
         let address = client
             .store_public_sequence(None, name, tag, owner, perms)
@@ -977,25 +980,25 @@ mod tests {
 
         let user_perms = seq_res?;
 
-        assert_eq!(Some(true), user_perms.is_allowed(SequenceAction::Read));
-        assert_eq!(None, user_perms.is_allowed(SequenceAction::Append));
+        assert_eq!(Some(true), user_perms.is_allowed(RegisterAction::Read));
+        assert_eq!(None, user_perms.is_allowed(RegisterAction::Append));
 
         let mut seq_res = client
-            .get_sequence_permissions(address, SequenceUser::Key(owner))
+            .get_sequence_permissions(address, RegisterUser::Key(owner))
             .await;
         while seq_res.is_err() {
             delay_for(Duration::from_millis(200)).await;
             seq_res = client
-                .get_sequence_permissions(address, SequenceUser::Key(owner))
+                .get_sequence_permissions(address, RegisterUser::Key(owner))
                 .await;
         }
 
         match seq_res? {
-            SequencePermissions::Public(user_perms) => {
-                assert_eq!(Some(true), user_perms.is_allowed(SequenceAction::Read));
-                assert_eq!(None, user_perms.is_allowed(SequenceAction::Append));
+            RegisterPermissions::Public(user_perms) => {
+                assert_eq!(Some(true), user_perms.is_allowed(RegisterAction::Read));
+                assert_eq!(None, user_perms.is_allowed(RegisterAction::Append));
             }
-            SequencePermissions::Private(_) => {
+            RegisterPermissions::Private(_) => {
                 return Err(anyhow!("Unexpectedly obtained incorrect user permissions",));
             }
         }
@@ -1014,7 +1017,7 @@ mod tests {
         }
 
         match client
-            .get_sequence_permissions(address, SequenceUser::Key(other_user))
+            .get_sequence_permissions(address, RegisterUser::Key(other_user))
             .await
         {
             Err(Error::NetworkDataError(DtError::NoSuchEntry)) => Ok(()),
@@ -1032,10 +1035,10 @@ mod tests {
         let client = create_test_client().await?;
 
         let owner = client.public_key().await;
-        let mut perms = BTreeMap::<SequenceUser, SequencePublicPermissions>::new();
+        let mut perms = BTreeMap::<RegisterUser, RegisterPublicPermissions>::new();
         let _ = perms.insert(
-            SequenceUser::Key(owner),
-            SequencePublicPermissions::new(true),
+            RegisterUser::Key(owner),
+            RegisterPublicPermissions::new(true),
         );
 
         let address = client
@@ -1043,11 +1046,15 @@ mod tests {
             .await?;
 
         // append to the data the data
-        let mut seq_res = client.append_to_sequence(address, b"VALUE1".to_vec()).await;
+        let mut seq_res = client
+            .append_to_sequence(address, b"VALUE1".to_vec(), BTreeSet::new())
+            .await;
 
         while seq_res.is_err() {
             delay_for(Duration::from_millis(200)).await;
-            seq_res = client.append_to_sequence(address, b"VALUE1".to_vec()).await;
+            seq_res = client
+                .append_to_sequence(address, b"VALUE1".to_vec(), BTreeSet::new())
+                .await;
         }
 
         // now check last entry
@@ -1064,11 +1071,15 @@ mod tests {
         assert_eq!(std::str::from_utf8(&data)?, "VALUE1");
 
         // append to the data the data
-        let mut seq_res = client.append_to_sequence(address, b"VALUE2".to_vec()).await;
+        let mut seq_res = client
+            .append_to_sequence(address, b"VALUE2".to_vec(), BTreeSet::new())
+            .await;
 
         while seq_res.is_err() {
             delay_for(Duration::from_millis(200)).await;
-            seq_res = client.append_to_sequence(address, b"VALUE2".to_vec()).await;
+            seq_res = client
+                .append_to_sequence(address, b"VALUE2".to_vec(), BTreeSet::new())
+                .await;
         }
 
         // and then lets check last entry
@@ -1094,7 +1105,7 @@ mod tests {
         let mut seq_res = client
             .get_sequence_range(
                 address,
-                (SequenceIndex::FromStart(0), SequenceIndex::FromEnd(0)),
+                (RegisterIndex::FromStart(0), RegisterIndex::FromEnd(0)),
             )
             .await;
 
@@ -1103,7 +1114,7 @@ mod tests {
             seq_res = client
                 .get_sequence_range(
                     address,
-                    (SequenceIndex::FromStart(0), SequenceIndex::FromEnd(0)),
+                    (RegisterIndex::FromStart(0), RegisterIndex::FromEnd(0)),
                 )
                 .await;
         }
@@ -1138,8 +1149,8 @@ mod tests {
         let client = create_test_client().await?;
 
         let owner = client.public_key().await;
-        let mut perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
-        let _ = perms.insert(owner, SequencePrivatePermissions::new(true, true));
+        let mut perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
+        let _ = perms.insert(owner, RegisterPrivatePermissions::new(true, true));
         let address = client
             .store_private_sequence(None, name, tag, owner, perms)
             .await?;
@@ -1166,9 +1177,9 @@ mod tests {
         let tag = 15000;
         let owner = client.public_key().await;
 
-        // store a Private Sequence
-        let mut perms = BTreeMap::<PublicKey, SequencePrivatePermissions>::new();
-        let _ = perms.insert(owner, SequencePrivatePermissions::new(true, true));
+        // store a Private Register
+        let mut perms = BTreeMap::<PublicKey, RegisterPrivatePermissions>::new();
+        let _ = perms.insert(owner, RegisterPrivatePermissions::new(true, true));
         let address = client
             .store_private_sequence(None, name, tag, owner, perms)
             .await?;
@@ -1194,11 +1205,11 @@ mod tests {
         match res {
             Err(Error::ErrorMessage(ErrorMessage::NoSuchData)) => Ok(()),
             Err(err) => Err(anyhow!(
-                "Unexpected error returned when deleting a nonexisting Private Sequence: {}",
+                "Unexpected error returned when deleting a nonexisting Private Register: {}",
                 err
             )),
             Ok(_data) => Err(anyhow!(
-                "Unexpectedly retrieved a deleted Private Sequence!",
+                "Unexpectedly retrieved a deleted Private Register!",
             )),
         }
     }
@@ -1211,9 +1222,9 @@ mod tests {
         let tag = 15000;
         let owner = client.public_key().await;
 
-        // store a Public Sequence
-        let mut perms = BTreeMap::<SequenceUser, SequencePublicPermissions>::new();
-        let _ = perms.insert(SequenceUser::Anyone, SequencePublicPermissions::new(true));
+        // store a Public Register
+        let mut perms = BTreeMap::<RegisterUser, RegisterPublicPermissions>::new();
+        let _ = perms.insert(RegisterUser::Anyone, RegisterPublicPermissions::new(true));
         let address = client
             .store_public_sequence(None, name, tag, owner, perms)
             .await?;
@@ -1232,7 +1243,7 @@ mod tests {
         match client.get_sequence(address).await {
             Err(Error::ErrorMessage(ErrorMessage::InvalidOperation)) => Ok(()),
             Err(err) => Err(anyhow!(
-                "Unexpected error returned when attempting to get a Public Sequence: {}",
+                "Unexpected error returned when attempting to get a Public Register: {}",
                 err
             )),
             Ok(_data) => Ok(()),
